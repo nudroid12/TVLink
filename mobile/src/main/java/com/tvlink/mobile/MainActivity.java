@@ -2,6 +2,12 @@ package com.tvlink.mobile;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+import android.widget.EditText;
+import android.widget.ScrollView;
+import android.widget.Toast;
+import java.io.*;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -89,6 +95,7 @@ public class MainActivity extends Activity {
     }
 
     private void home() {
+        closeRemote();
         showingHome = true;
         LinearLayout page = screen(null);
         LinearLayout header = new LinearLayout(this);
@@ -114,12 +121,13 @@ public class MainActivity extends Activity {
         menu.setOrientation(LinearLayout.HORIZONTAL);
         page.addView(menu, new LinearLayout.LayoutParams(-1, -2));
         String[] titles = {label("Send", "Hantar"), "Remote", label("Files", "Fail")};
+        Runnable[] actions = {this::showSend, this::showRemote, this::showFiles};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Button first = null;
         for (int index = 0; index < titles.length; index++) {
             String title = titles[index];
             boolean primary = index == 0;
-            Button item = styleButton(new MenuTile(), title, () -> preview(title), primary);
+            Button item = styleButton(new MenuTile(), title, actions[index], primary);
             item.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
             item.setCompoundDrawablePadding(dp(8));
             item.setPadding(dp(2), dp(10), dp(2), dp(10));
@@ -149,17 +157,281 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void preview(String title) {
+    private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private BluetoothRemote remote;
+    private TextView remoteStatus;
+    private boolean busy;
+
+    private LinearLayout feature(String title) {
         showingHome = false;
         LinearLayout page = screen(title);
-        TextView status = new TextView(this);
-        status.setText(label("Feature in development", "Fungsi dalam pembangunan"));
-        status.setTextColor(0xffb2c2dd);
-        status.setPadding(0, 0, 0, dp(16));
-        page.addView(status);
-        Button back = button(label("Home", "Muka depan"), this::home);
-        page.addView(back, new LinearLayout.LayoutParams(-2, dp(48)));
-        if (TV) back.requestFocus();
+        page.addView(button(label("Back", "Kembali"), this::home));
+        ScrollView scroll = new ScrollView(this);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(body);
+        return body;
+    }
+
+    private TextView info(LinearLayout body, String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setPadding(0, dp(12), 0, dp(12));
+        body.addView(view);
+        return view;
+    }
+
+    private interface Work { void run() throws IOException; }
+
+    private void work(Work action) {
+        work(action, null);
+    }
+
+    private void work(Work action, Runnable success) {
+        if (busy || isDestroyed()) return;
+        busy = true;
+        io.execute(() -> {
+            boolean succeeded = false;
+            try {
+                action.run();
+                succeeded = true;
+                if (success != null) {
+                    runOnUiThread(() -> {
+                        busy = false;
+                        if (!isDestroyed()) success.run();
+                    });
+                    return;
+                }
+            }
+            catch (Exception error) {
+                runOnUiThread(() -> notifyUser(error.getMessage() == null ? "Request failed" : error.getMessage()));
+            } finally {
+                if (!succeeded || success == null) runOnUiThread(() -> busy = false);
+            }
+        });
+    }
+
+    private void notifyUser(String message) {
+        if (!isFinishing() && !isDestroyed()) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    private void showSend() {
+        LinearLayout body = feature(label("Send", "Hantar"));
+        info(body, label("Open Receive on the TV. Both devices must be on the same trusted network.",
+                "Buka Terima pada TV. Kedua-dua peranti mesti berada pada rangkaian dipercayai yang sama."));
+        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
+        body.addView(button(label("Choose file", "Pilih fail"), () -> {
+            if (getPreferences(MODE_PRIVATE).getString("token", "").isEmpty()) {
+                pairTv();
+                return;
+            }
+            if (busy) return;
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*");
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(picker, 10);
+        }));
+    }
+
+    private void pairTv() {
+        LinearLayout inputs = new LinearLayout(this);
+        inputs.setOrientation(LinearLayout.VERTICAL);
+        EditText host = new EditText(this);
+        host.setSingleLine(true);
+        host.setHint(label("TV IPv4 address", "Alamat IPv4 TV"));
+        host.setText(getPreferences(MODE_PRIVATE).getString("host", ""));
+        EditText code = new EditText(this);
+        code.setHint(label("Pairing code", "Kod pasangan"));
+        code.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        inputs.addView(host);
+        inputs.addView(code);
+        new AlertDialog.Builder(this).setTitle(label("Pair TV", "Pasangkan TV")).setView(inputs)
+                .setNegativeButton(label("Cancel", "Batal"), null)
+                .setPositiveButton(label("Pair", "Pasangkan"), (dialog, which) -> {
+                    String ip = host.getText().toString().trim();
+                    String pin = code.getText().toString().trim();
+                    if (!android.util.Patterns.IP_ADDRESS.matcher(ip).matches() || !pin.matches("[0-9]{8}")) {
+                        notifyUser(label("Enter the TV address and eight-digit code.", "Masukkan alamat TV dan kod lapan digit."));
+                        return;
+                    }
+                    android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+                    work(() -> {
+                        try (TransferClient client = new TransferClient(ip, "PAIR", pin)) {
+                            settings.edit().putString("host", ip).putString("token", client.pair()).apply();
+                        }
+                        runOnUiThread(() -> notifyUser(label("TV paired", "TV dipasangkan")));
+                    });
+                }).show();
+    }
+
+    private TransferClient client(String operation) throws IOException {
+        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+        String host = settings.getString("host", "");
+        String token = settings.getString("token", "");
+        if (token.isEmpty()) throw new IOException("Pair with the TV first");
+        return new TransferClient(host, operation, token);
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != 10 || result != RESULT_OK || data == null || data.getData() == null) return;
+        android.net.Uri uri = data.getData();
+        LinearLayout body = feature(label("Send", "Hantar"));
+        TextView progress = info(body, label("Preparing file…", "Menyediakan fail…"));
+        work(() -> {
+            String name;
+            long size;
+            try (android.database.Cursor cursor = getContentResolver().query(uri,
+                    new String[] {android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE},
+                    null, null, null)) {
+                if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0) || cursor.isNull(1)) {
+                    throw new IOException("File name or size unavailable. Choose a locally stored file.");
+                }
+                name = cursor.getString(0);
+                size = cursor.getLong(1);
+            }
+            try (InputStream stream = getContentResolver().openInputStream(uri);
+                 TransferClient client = client("SEND")) {
+                if (stream == null) throw new IOException("Cannot read file");
+                client.send(name, size, stream, percent -> runOnUiThread(() ->
+                        progress.setText(name + " · " + percent + "%")));
+            }
+            runOnUiThread(() -> progress.setText(label("Sent: ", "Dihantar: ") + name));
+        });
+    }
+
+    private void showFiles() {
+        if (busy) return;
+        LinearLayout body = feature(label("Files on TV", "Fail di TV"));
+        body.addView(button(label("Refresh", "Muat semula"), this::showFiles));
+        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
+        work(() -> {
+            try (TransferClient client = client("LIST")) {
+                java.util.List<String> files = client.list();
+                java.util.Collections.sort(files, String.CASE_INSENSITIVE_ORDER);
+                runOnUiThread(() -> {
+                    if (files.isEmpty()) info(body, label("No files received yet", "Belum ada fail diterima"));
+                    for (String name : files) body.addView(button(name, () -> fileActions(name)));
+                });
+            }
+        });
+    }
+
+    private void fileActions(String name) {
+        new AlertDialog.Builder(this).setTitle(name)
+                .setItems(new String[] {label("Rename", "Tukar nama"), label("Delete", "Padam")}, (dialog, choice) -> {
+                    if (choice == 0) {
+                        EditText input = new EditText(this);
+                        input.setSingleLine(true);
+                        input.setText(name);
+                        new AlertDialog.Builder(this).setTitle(label("Rename", "Tukar nama")).setView(input)
+                                .setNegativeButton(label("Cancel", "Batal"), null)
+                                .setPositiveButton(label("Save", "Simpan"), (d, w) ->
+                                        changeFile("RENAME", name, input.getText().toString().trim())).show();
+                    } else {
+                        new AlertDialog.Builder(this).setTitle(label("Delete file?", "Padam fail?")).setMessage(name)
+                                .setNegativeButton(label("Cancel", "Batal"), null)
+                                .setPositiveButton(label("Delete", "Padam"), (d, w) -> changeFile("DELETE", name)).show();
+                    }
+                }).show();
+    }
+
+    private void changeFile(String operation, String... names) {
+        work(() -> {
+            try (TransferClient client = client(operation)) { client.change(names); }
+        }, () -> {
+            if (!showingHome) showFiles();
+        });
+    }
+
+    private void showRemote() {
+        LinearLayout body = feature("Remote");
+        remoteStatus = info(body, label("Start Bluetooth remote, then pair this phone from the TV's Bluetooth accessories menu.",
+                "Mulakan remote Bluetooth, kemudian pasangkan telefon ini dari menu aksesori Bluetooth TV."));
+        body.addView(button(label("Start remote", "Mulakan remote"), this::startRemote));
+        body.addView(button(label("Make phone discoverable", "Jadikan telefon boleh dikesan"), () -> {
+            if (!remoteReady()) return;
+            Intent request = new Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+            request.putExtra(android.bluetooth.BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120);
+            startActivity(request);
+        }));
+        body.addView(button(label("Connect paired TV", "Sambung TV dipasangkan"), () -> {
+            if (!remoteReady()) return;
+            android.bluetooth.BluetoothDevice[] devices = remote.paired();
+            if (devices.length == 0) {
+                notifyUser(label("Pair the TV first", "Pasangkan TV dahulu"));
+                return;
+            }
+            String[] names = new String[devices.length];
+            for (int i = 0; i < devices.length; i++) {
+                String name = devices[i].getName();
+                names[i] = name == null ? devices[i].getAddress() : name + " · " + devices[i].getAddress();
+            }
+            new AlertDialog.Builder(this).setTitle(label("Choose TV", "Pilih TV"))
+                    .setItems(names, (d, index) -> {
+                        if (!remote.connect(devices[index])) notifyUser(label("Connection failed", "Sambungan gagal"));
+                    }).show();
+        }));
+        remoteRow(body, new String[] {"↑"}, new int[] {82}, 1);
+        remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {80, 40, 79}, 1);
+        remoteRow(body, new String[] {"↓"}, new int[] {81}, 1);
+        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")}, new int[] {2, 1}, 2);
+    }
+
+    private void remoteRow(LinearLayout body, String[] names, int[] codes, int report) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        body.addView(row);
+        for (int index = 0; index < names.length; index++) {
+            int code = codes[index];
+            Button key = button(names[index], () -> {
+                if (!remoteReady()) return;
+                if (!remote.key(report, code)) notifyUser(label("Connect the TV first", "Sambungkan TV dahulu"));
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(52));
+            params.setMargins(dp(3), dp(3), dp(3), dp(3));
+            row.addView(key, params);
+        }
+    }
+
+    private boolean remoteReady() {
+        if (remote != null && remote.ready()) return true;
+        notifyUser(label("Start the remote and wait until it is ready.", "Mulakan remote dan tunggu sehingga sedia."));
+        return false;
+    }
+
+    private void startRemote() {
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            notifyUser("Bluetooth remote requires Android 9 or newer.");
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 31 &&
+                (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PERMISSION_GRANTED ||
+                 checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PERMISSION_GRANTED)) {
+            requestPermissions(new String[] {android.Manifest.permission.BLUETOOTH_CONNECT,
+                    android.Manifest.permission.BLUETOOTH_ADVERTISE}, 20);
+            return;
+        }
+        if (remote != null && remote.ready()) return;
+        closeRemote();
+        remote = new BluetoothRemote(this, message -> remoteStatus.setText(message));
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == 20 && results.length == 2 && results[0] == PERMISSION_GRANTED &&
+                results[1] == PERMISSION_GRANTED && !showingHome) startRemote();
+    }
+
+    private void closeRemote() {
+        if (remote != null) remote.close();
+        remote = null;
+    }
+
+    @Override protected void onDestroy() {
+        closeRemote();
+        io.shutdownNow();
+        super.onDestroy();
     }
 
     @Override public void onBackPressed() {
