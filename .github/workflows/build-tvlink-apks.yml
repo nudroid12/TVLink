@@ -83,7 +83,29 @@ jobs:
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
-          sdkmanager --install 'platforms;android-35' 'build-tools;34.0.0'
+          missing=()
+          if [[ ! -s "$sdk/platforms/android-35/android.jar" ]]; then
+            missing+=('platforms;android-35')
+          fi
+          if [[ ! -x "$sdk/build-tools/34.0.0/apksigner" ]]; then
+            missing+=('build-tools;34.0.0')
+          fi
+          if (( ${#missing[@]} )); then
+            sdkmanager_bin="$(command -v sdkmanager || true)"
+            if [[ -z "$sdkmanager_bin" ]]; then
+              for candidate in "$sdk/cmdline-tools/latest/bin/sdkmanager" "$sdk"/cmdline-tools/*/bin/sdkmanager; do
+                if [[ -x "$candidate" ]]; then
+                  sdkmanager_bin="$candidate"
+                  break
+                fi
+              done
+            fi
+            if [[ -z "$sdkmanager_bin" ]]; then
+              echo "::error::Android SDK packages missing (${missing[*]}) and sdkmanager was not found under $sdk/cmdline-tools."
+              exit 1
+            fi
+            "$sdkmanager_bin" --sdk_root="$sdk" --install "${missing[@]}"
+          fi
           tasks=()
           if [[ "$MOBILE" == true ]]; then tasks+=(:mobile:assembleDebug); fi
           if [[ "$TV" == true ]]; then tasks+=(:tv:assembleDebug); fi
