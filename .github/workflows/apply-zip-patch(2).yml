@@ -1,0 +1,72 @@
+name: Apply ZIP Patch
+on:
+  push:
+    branches: [main]
+    paths: [TVLink-Patch.zip]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tvlink-apply-zip
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Apply and commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f TVLink-Patch.zip ]]; then
+            echo "No TVLink-Patch.zip at this commit."
+            exit 0
+          fi
+          python3 - TVLink-Patch.zip <<'PYTHON'
+          """Overlay root-relative TVLink application files from a ZIP."""
+          import stat
+          import sys
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          MODULES = {"mobile", "tv", "shared"}
+          ROOT_FILES = {"settings.gradle.kts", "build.gradle.kts", "gradle.properties"}
+          MAX_BYTES = 100 * 1024 * 1024
+
+          with ZipFile(sys.argv[1]) as archive:
+              entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+              if not entries or sum(entry.file_size for entry in entries) > MAX_BYTES:
+                  raise SystemExit("Patch is empty or exceeds 100 MiB uncompressed.")
+
+              seen = set()
+              for entry in entries:
+                  raw = entry.filename
+                  path = PurePosixPath(raw)
+                  safe_root = (path.parts and path.parts[0] in MODULES and len(path.parts) > 1)
+                  safe_file = raw in ROOT_FILES
+                  if (not (safe_root or safe_file) or path.as_posix() != raw or
+                          ".." in path.parts or "\\" in raw or raw in seen or
+                          stat.S_ISLNK(entry.external_attr >> 16)):
+                      raise SystemExit(f"Invalid patch entry: {raw!r}")
+                  destination = Path(raw)
+                  if any(part.is_symlink() for part in (destination, *destination.parents)):
+                      raise SystemExit(f"Symlink in destination: {raw!r}")
+                  if destination.exists() and not destination.is_file():
+                      raise SystemExit(f"Destination is not a file: {raw!r}")
+                  seen.add(raw)
+
+              for entry in entries:
+                  destination = Path(entry.filename)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  destination.write_bytes(archive.read(entry))
+          PYTHON
+          git rm -- TVLink-Patch.zip
+          git add --all
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Apply TVLink patch [zip-applied]'
+          git push origin HEAD:refs/heads/main
