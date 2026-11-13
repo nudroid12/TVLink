@@ -204,7 +204,7 @@ public class MainActivity extends Activity {
         LinearLayout body = feature(label("Receive", "Terima"));
         receivingScreen = true;
         try {
-            if (receiver == null) receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE), this::remoteKey);
+            if (receiver == null) receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
         } catch (IOException error) {
             info(body, label("Cannot start receiver: ", "Penerima gagal dimulakan: ") + error.getMessage());
             return;
@@ -244,41 +244,8 @@ public class MainActivity extends Activity {
 
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
-        info(body, label("Keep TVLink open. Pair your phone using Receive and use the remote to navigate TVLink.",
-                "Biarkan TVLink terbuka. Pasangkan telefon melalui Terima dan guna remote untuk menavigasi TVLink."));
-        body.addView(button(label("Receive", "Terima"), this::showReceive));
-    }
-
-    private boolean remoteKey(String key) throws IOException {
-        java.util.concurrent.FutureTask<Boolean> command = new java.util.concurrent.FutureTask<>(() -> {
-            if (receiver == null || !hasWindowFocus()) return false;
-            int keyCode;
-            switch (key) {
-                case "UP": keyCode = android.view.KeyEvent.KEYCODE_DPAD_UP; break;
-                case "DOWN": keyCode = android.view.KeyEvent.KEYCODE_DPAD_DOWN; break;
-                case "LEFT": keyCode = android.view.KeyEvent.KEYCODE_DPAD_LEFT; break;
-                case "RIGHT": keyCode = android.view.KeyEvent.KEYCODE_DPAD_RIGHT; break;
-                case "OK": keyCode = android.view.KeyEvent.KEYCODE_DPAD_CENTER; break;
-                case "BACK":
-                case "HOME":
-                    home();
-                    return true;
-                default: return false;
-            }
-            boolean handled = dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode));
-            return dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode)) || handled;
-        });
-        refresh.post(command);
-        try {
-            return command.get(2, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Remote command interrupted", error);
-        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException error) {
-            throw new IOException("Remote command failed", error);
-        } finally {
-            command.cancel(false);
-        }
+        info(body, label("On your phone, open Remote and select Pair system remote. Enter the code shown by Android TV.",
+                "Di telefon, buka Remote dan pilih Pasangkan remote sistem. Masukkan kod yang dipaparkan oleh Android TV."));
     }
 
     private void showFiles() {
@@ -374,7 +341,7 @@ public class MainActivity extends Activity {
             showReceive();
         } else if (receiver == null && !getPreferences(MODE_PRIVATE).getString("transfer_token", "").isEmpty()) {
             try {
-                receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE), this::remoteKey);
+                receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
             } catch (IOException error) {
                 android.util.Log.w("TVLink", "Cannot resume receiver", error);
             }

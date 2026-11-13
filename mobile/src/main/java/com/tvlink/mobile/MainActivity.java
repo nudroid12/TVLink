@@ -340,45 +340,144 @@ public class MainActivity extends Activity {
         });
     }
 
+    private final java.util.concurrent.ThreadPoolExecutor remoteIo =
+            new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<>(16),
+                    new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
+    private AndroidTvRemote remoteConnection;
+    private boolean remotePairing;
+
     private void showRemote() {
         LinearLayout body = feature("Remote");
-        info(body, label("Pair the TV once and keep TVLink open on the TV. This remote controls TVLink.",
-                "Pasangkan TV sekali dan biarkan TVLink terbuka pada TV. Remote ini mengawal TVLink."));
-        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
-        remoteRow(body, new String[] {"↑"}, new String[] {"UP"});
-        remoteRow(body, new String[] {"←", "OK", "→"}, new String[] {"LEFT", "OK", "RIGHT"});
-        remoteRow(body, new String[] {"↓"}, new String[] {"DOWN"});
-        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")},
-                new String[] {"BACK", "HOME"});
+        info(body, label("Connect to Android TV Remote Service over Wi-Fi.",
+                "Sambung ke Android TV Remote Service melalui Wi-Fi."));
+        body.addView(button(label("Pair system remote", "Pasangkan remote sistem"), this::pairSystemRemote));
+        remoteRow(body, new String[] {"↑"}, new int[] {19});
+        remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {21, 23, 22});
+        remoteRow(body, new String[] {"↓"}, new int[] {20});
+        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")}, new int[] {4, 3});
     }
 
-    private void remoteRow(LinearLayout body, String[] names, String[] keys) {
+    private void pairSystemRemote() {
+        if (remotePairing) return;
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        EditText ip = new EditText(this);
+        ip.setSingleLine(true);
+        ip.setHint("TV IP address");
+        ip.setText(prefs.getString("remote_host", prefs.getString("host", "")));
+        new AlertDialog.Builder(this).setTitle("Pair system remote").setView(ip)
+                .setNegativeButton(label("Cancel", "Batal"), null)
+                .setPositiveButton("Connect", (dialog, which) -> {
+                    String host = ip.getText().toString().trim();
+                    if (!android.util.Patterns.IP_ADDRESS.matcher(host).matches()) {
+                        notifyUser("Enter a valid TV IP address.");
+                        return;
+                    }
+                    remotePairing = true;
+                    remoteIo.execute(() -> {
+                        AndroidTvRemote pairing = null;
+                        try {
+                            pairing = new AndroidTvRemote(host, true, "");
+                            pairing.beginPairing();
+                            AndroidTvRemote pending = pairing;
+                            runOnUiThread(() -> enterRemoteCode(pending, host));
+                        } catch (Exception error) {
+                            if (pairing != null) pairing.close();
+                            runOnUiThread(() -> {
+                                remotePairing = false;
+                                notifyUser("Could not reach Android TV Remote Service: " + error.getMessage());
+                            });
+                        }
+                    });
+                }).show();
+    }
+
+    private void enterRemoteCode(AndroidTvRemote pairing, String host) {
+        if (isFinishing() || isDestroyed()) {
+            pairing.close();
+            return;
+        }
+        EditText code = new EditText(this);
+        code.setSingleLine(true);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Enter the code shown on TV").setView(code)
+                .setNegativeButton(label("Cancel", "Batal"), null)
+                .setPositiveButton("Pair", null).create();
+        dialog.setOnDismissListener(ignored -> {
+            pairing.close();
+            remotePairing = false;
+        });
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String value = code.getText().toString().trim();
+            if (!value.matches("[0-9a-fA-F]{6}")) {
+                code.setError("Enter the six-character code");
+                return;
+            }
+            dialog.setOnDismissListener(null);
+            dialog.dismiss();
+            remoteIo.execute(() -> {
+                try (AndroidTvRemote connection = pairing) {
+                    String pin = connection.finishPairing(value);
+                    getPreferences(MODE_PRIVATE).edit().putString("remote_host", host)
+                            .putString("remote_pin", pin).apply();
+                    closeSystemRemote();
+                    runOnUiThread(() -> notifyUser("System remote paired"));
+                } catch (Exception error) {
+                    runOnUiThread(() -> notifyUser("Pairing failed: " + error.getMessage()));
+                } finally {
+                    runOnUiThread(() -> remotePairing = false);
+                }
+            });
+        });
+    }
+
+    private void remoteRow(LinearLayout body, String[] names, int[] keys) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         body.addView(row);
         for (int index = 0; index < names.length; index++) {
-            String key = keys[index];
-            Button control = button(names[index], () -> {
-                if (getPreferences(MODE_PRIVATE).getString("token", "").isEmpty()) {
-                    pairTv();
-                    return;
-                }
-                work(() -> {
-                    try (TransferClient client = client("REMOTE")) {
-                        client.change(key);
-                    } catch (java.net.ConnectException | java.net.SocketTimeoutException error) {
-                        throw new IOException(label("TV remote unavailable. Check Wi-Fi and open TVLink on the TV.",
-                                "Remote TV tidak tersedia. Semak Wi-Fi dan buka TVLink pada TV."), error);
-                    }
-                });
-            });
+            int key = keys[index];
+            Button control = button(names[index], () -> sendSystemKey(key));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(52));
             params.setMargins(dp(3), dp(3), dp(3), dp(3));
             row.addView(control, params);
         }
     }
 
+    private void sendSystemKey(int key) {
+        if (remotePairing) return;
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("remote_host", "");
+        String pin = prefs.getString("remote_pin", "");
+        if (host.isEmpty() || pin.isEmpty()) {
+            pairSystemRemote();
+            return;
+        }
+        remoteIo.execute(() -> {
+            try {
+                if (remoteConnection == null || !remoteConnection.isOpen()) {
+                    closeSystemRemote();
+                    remoteConnection = new AndroidTvRemote(host, false, pin);
+                    remoteConnection.start();
+                }
+                remoteConnection.key(key);
+            } catch (Exception error) {
+                closeSystemRemote();
+                remoteIo.getQueue().clear();
+                runOnUiThread(() -> notifyUser("TV remote unavailable: " + error.getMessage()));
+            }
+        });
+    }
+
+    private void closeSystemRemote() {
+        if (remoteConnection != null) remoteConnection.close();
+        remoteConnection = null;
+    }
+
     @Override protected void onDestroy() {
+        remoteIo.getQueue().clear();
+        remoteIo.execute(this::closeSystemRemote);
+        remoteIo.shutdown();
         io.shutdownNow();
         super.onDestroy();
     }

@@ -11,11 +11,6 @@ import java.util.UUID;
 final class TransferServer implements AutoCloseable {
     static final int PORT = 47832;
     private static final long LIMIT = 4L * 1024 * 1024 * 1024;
-    interface RemoteCommands {
-        boolean send(String key) throws IOException;
-    }
-
-    private final RemoteCommands remote;
     private final File folder;
     private final ServerSocket server;
     private Socket active;
@@ -26,11 +21,6 @@ final class TransferServer implements AutoCloseable {
     private final android.content.SharedPreferences settings;
 
     TransferServer(File folder, android.content.SharedPreferences settings) throws IOException {
-        this(folder, settings, null);
-    }
-
-    TransferServer(File folder, android.content.SharedPreferences settings, RemoteCommands remote) throws IOException {
-        this.remote = remote;
         this.folder = folder;
         this.settings = settings;
         if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Cannot create file folder");
@@ -118,12 +108,6 @@ final class TransferServer implements AutoCloseable {
                 String token = settings.getString("transfer_token", "");
                 if (token.isEmpty() || !equal(token, in.readUTF())) throw new IOException("Pair with TV again");
                 switch (operation) {
-                    case "REMOTE":
-                        if (remote == null || !remote.send(in.readUTF())) {
-                            throw new IOException("Open TVLink on the TV to use the in-app remote");
-                        }
-                        out.writeUTF("OK");
-                        break;
                     case "LIST":
                         File[] files = folder.listFiles(f -> f.isFile() && !f.getName().startsWith("."));
                         if (files == null) throw new IOException("Cannot list files");
