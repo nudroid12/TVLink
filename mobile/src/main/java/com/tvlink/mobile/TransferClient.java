@@ -12,7 +12,7 @@ final class TransferClient implements AutoCloseable {
 
     TransferClient(String host, String operation, String credential) throws IOException {
         try {
-            socket.connect(new InetSocketAddress(host, "REMOTE".equals(operation) ? 47833 : 47832), 5000);
+            socket.connect(new InetSocketAddress(host, 47832), 5000);
             socket.setSoTimeout(15000);
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));

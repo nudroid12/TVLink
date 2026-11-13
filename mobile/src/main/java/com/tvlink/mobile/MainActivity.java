@@ -342,8 +342,8 @@ public class MainActivity extends Activity {
 
     private void showRemote() {
         LinearLayout body = feature("Remote");
-        info(body, label("Pair the TV once and enable TVLink Remote in the TV Accessibility settings.",
-                "Pasangkan TV sekali dan hidupkan TVLink Remote dalam tetapan Kebolehcapaian TV."));
+        info(body, label("Pair the TV once and keep TVLink open on the TV. This remote controls TVLink.",
+                "Pasangkan TV sekali dan biarkan TVLink terbuka pada TV. Remote ini mengawal TVLink."));
         body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
         remoteRow(body, new String[] {"↑"}, new String[] {"UP"});
         remoteRow(body, new String[] {"←", "OK", "→"}, new String[] {"LEFT", "OK", "RIGHT"});
@@ -367,8 +367,8 @@ public class MainActivity extends Activity {
                     try (TransferClient client = client("REMOTE")) {
                         client.change(key);
                     } catch (java.net.ConnectException | java.net.SocketTimeoutException error) {
-                        throw new IOException(label("TV remote unavailable. Check Wi-Fi and enable TVLink Remote on the TV.",
-                                "Remote TV tidak tersedia. Semak Wi-Fi dan hidupkan TVLink Remote pada TV."), error);
+                        throw new IOException(label("TV remote unavailable. Check Wi-Fi and open TVLink on the TV.",
+                                "Remote TV tidak tersedia. Semak Wi-Fi dan buka TVLink pada TV."), error);
                     }
                 });
             });

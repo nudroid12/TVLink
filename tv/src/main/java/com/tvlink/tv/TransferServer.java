@@ -37,12 +37,12 @@ final class TransferServer implements AutoCloseable {
         server = new ServerSocket();
         try {
             server.setReuseAddress(true);
-            server.bind(new InetSocketAddress(remote == null ? PORT : 47833));
+            server.bind(new InetSocketAddress(PORT));
         } catch (IOException error) {
             server.close();
             throw error;
         }
-        if (remote == null && settings.getString("transfer_token", "").isEmpty()) renewCode();
+        if (settings.getString("transfer_token", "").isEmpty()) renewCode();
         else code = "";
         new Thread(this::serve, "TVLink receiver").start();
     }
@@ -112,18 +112,18 @@ final class TransferServer implements AutoCloseable {
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         try {
             String operation = in.readUTF();
-            if (remote != null) {
-                if (!"REMOTE".equals(operation)) throw new IOException("Unknown remote request");
-                String token = settings.getString("transfer_token", "");
-                if (token.isEmpty() || !equal(token, in.readUTF())) throw new IOException("Pair with TV again");
-                if (!remote.send(in.readUTF())) throw new IOException("TV could not perform this key on the current screen");
-                out.writeUTF("OK");
-            } else if ("PAIR".equals(operation)) {
+            if ("PAIR".equals(operation)) {
                 pair(in.readUTF(), out);
             } else {
                 String token = settings.getString("transfer_token", "");
                 if (token.isEmpty() || !equal(token, in.readUTF())) throw new IOException("Pair with TV again");
                 switch (operation) {
+                    case "REMOTE":
+                        if (remote == null || !remote.send(in.readUTF())) {
+                            throw new IOException("Open TVLink on the TV to use the in-app remote");
+                        }
+                        out.writeUTF("OK");
+                        break;
                     case "LIST":
                         File[] files = folder.listFiles(f -> f.isFile() && !f.getName().startsWith("."));
                         if (files == null) throw new IOException("Cannot list files");
