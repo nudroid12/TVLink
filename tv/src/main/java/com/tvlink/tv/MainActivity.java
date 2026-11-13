@@ -244,10 +244,15 @@ public class MainActivity extends Activity {
 
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
-        info(body, label("On the phone, open TVLink Remote and start Bluetooth remote. Pair the phone in Android TV Settings under Remotes & Accessories.",
-                "Di telefon, buka Remote TVLink dan mulakan remote Bluetooth. Pasangkan telefon di Remotes & Accessories dalam tetapan Android TV."));
-        body.addView(button(label("Open settings", "Buka tetapan"), () ->
-                startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS))));
+        info(body, label("Enable TVLink Remote in Accessibility. Then pair your phone using Receive and keep both devices on the same Wi-Fi network.",
+                "Hidupkan TVLink Remote dalam Kebolehcapaian. Kemudian pasangkan telefon melalui Terima dan gunakan rangkaian Wi-Fi yang sama."));
+        body.addView(button(label("Accessibility settings", "Tetapan kebolehcapaian"), () -> {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            } catch (android.content.ActivityNotFoundException error) {
+                startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+            }
+        }));
     }
 
     private void showFiles() {

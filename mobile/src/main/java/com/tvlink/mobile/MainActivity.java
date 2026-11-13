@@ -3,7 +3,6 @@ package com.tvlink.mobile;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.Toast;
@@ -95,7 +94,6 @@ public class MainActivity extends Activity {
     }
 
     private void home() {
-        closeRemote();
         showingHome = true;
         LinearLayout page = screen(null);
         LinearLayout header = new LinearLayout(this);
@@ -158,8 +156,6 @@ public class MainActivity extends Activity {
     }
 
     private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
-    private BluetoothRemote remote;
-    private TextView remoteStatus;
     private boolean busy;
 
     private LinearLayout feature(String title) {
@@ -346,90 +342,43 @@ public class MainActivity extends Activity {
 
     private void showRemote() {
         LinearLayout body = feature("Remote");
-        remoteStatus = info(body, label("Start Bluetooth remote, then pair this phone from the TV's Bluetooth accessories menu.",
-                "Mulakan remote Bluetooth, kemudian pasangkan telefon ini dari menu aksesori Bluetooth TV."));
-        body.addView(button(label("Start remote", "Mulakan remote"), this::startRemote));
-        body.addView(button(label("Make phone discoverable", "Jadikan telefon boleh dikesan"), () -> {
-            if (!remoteReady()) return;
-            Intent request = new Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
-            request.putExtra(android.bluetooth.BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120);
-            startActivity(request);
-        }));
-        body.addView(button(label("Connect paired TV", "Sambung TV dipasangkan"), () -> {
-            if (!remoteReady()) return;
-            android.bluetooth.BluetoothDevice[] devices = remote.paired();
-            if (devices.length == 0) {
-                notifyUser(label("Pair the TV first", "Pasangkan TV dahulu"));
-                return;
-            }
-            String[] names = new String[devices.length];
-            for (int i = 0; i < devices.length; i++) {
-                String name = devices[i].getName();
-                names[i] = name == null ? devices[i].getAddress() : name + " · " + devices[i].getAddress();
-            }
-            new AlertDialog.Builder(this).setTitle(label("Choose TV", "Pilih TV"))
-                    .setItems(names, (d, index) -> {
-                        if (!remote.connect(devices[index])) notifyUser(label("Connection failed", "Sambungan gagal"));
-                    }).show();
-        }));
-        remoteRow(body, new String[] {"↑"}, new int[] {82}, 1);
-        remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {80, 40, 79}, 1);
-        remoteRow(body, new String[] {"↓"}, new int[] {81}, 1);
-        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")}, new int[] {2, 1}, 2);
+        info(body, label("Pair the TV once and enable TVLink Remote in the TV Accessibility settings.",
+                "Pasangkan TV sekali dan hidupkan TVLink Remote dalam tetapan Kebolehcapaian TV."));
+        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
+        remoteRow(body, new String[] {"↑"}, new String[] {"UP"});
+        remoteRow(body, new String[] {"←", "OK", "→"}, new String[] {"LEFT", "OK", "RIGHT"});
+        remoteRow(body, new String[] {"↓"}, new String[] {"DOWN"});
+        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")},
+                new String[] {"BACK", "HOME"});
     }
 
-    private void remoteRow(LinearLayout body, String[] names, int[] codes, int report) {
+    private void remoteRow(LinearLayout body, String[] names, String[] keys) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         body.addView(row);
         for (int index = 0; index < names.length; index++) {
-            int code = codes[index];
-            Button key = button(names[index], () -> {
-                if (!remoteReady()) return;
-                if (!remote.key(report, code)) notifyUser(label("Connect the TV first", "Sambungkan TV dahulu"));
+            String key = keys[index];
+            Button control = button(names[index], () -> {
+                if (getPreferences(MODE_PRIVATE).getString("token", "").isEmpty()) {
+                    pairTv();
+                    return;
+                }
+                work(() -> {
+                    try (TransferClient client = client("REMOTE")) {
+                        client.change(key);
+                    } catch (java.net.ConnectException | java.net.SocketTimeoutException error) {
+                        throw new IOException(label("TV remote unavailable. Check Wi-Fi and enable TVLink Remote on the TV.",
+                                "Remote TV tidak tersedia. Semak Wi-Fi dan hidupkan TVLink Remote pada TV."), error);
+                    }
+                });
             });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(52));
             params.setMargins(dp(3), dp(3), dp(3), dp(3));
-            row.addView(key, params);
+            row.addView(control, params);
         }
-    }
-
-    private boolean remoteReady() {
-        if (remote != null && remote.ready()) return true;
-        notifyUser(label("Start the remote and wait until it is ready.", "Mulakan remote dan tunggu sehingga sedia."));
-        return false;
-    }
-
-    private void startRemote() {
-        if (android.os.Build.VERSION.SDK_INT < 28) {
-            notifyUser("Bluetooth remote requires Android 9 or newer.");
-            return;
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 31 &&
-                (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PERMISSION_GRANTED ||
-                 checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PERMISSION_GRANTED)) {
-            requestPermissions(new String[] {android.Manifest.permission.BLUETOOTH_CONNECT,
-                    android.Manifest.permission.BLUETOOTH_ADVERTISE}, 20);
-            return;
-        }
-        if (remote != null && remote.ready()) return;
-        closeRemote();
-        remote = new BluetoothRemote(this, message -> remoteStatus.setText(message));
-    }
-
-    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(request, permissions, results);
-        if (request == 20 && results.length == 2 && results[0] == PERMISSION_GRANTED &&
-                results[1] == PERMISSION_GRANTED && !showingHome) startRemote();
-    }
-
-    private void closeRemote() {
-        if (remote != null) remote.close();
-        remote = null;
     }
 
     @Override protected void onDestroy() {
-        closeRemote();
         io.shutdownNow();
         super.onDestroy();
     }

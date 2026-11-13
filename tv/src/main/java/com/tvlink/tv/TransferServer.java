@@ -11,6 +11,11 @@ import java.util.UUID;
 final class TransferServer implements AutoCloseable {
     static final int PORT = 47832;
     private static final long LIMIT = 4L * 1024 * 1024 * 1024;
+    interface RemoteCommands {
+        boolean send(String key) throws IOException;
+    }
+
+    private final RemoteCommands remote;
     private final File folder;
     private final ServerSocket server;
     private Socket active;
@@ -21,18 +26,23 @@ final class TransferServer implements AutoCloseable {
     private final android.content.SharedPreferences settings;
 
     TransferServer(File folder, android.content.SharedPreferences settings) throws IOException {
+        this(folder, settings, null);
+    }
+
+    TransferServer(File folder, android.content.SharedPreferences settings, RemoteCommands remote) throws IOException {
+        this.remote = remote;
         this.folder = folder;
         this.settings = settings;
         if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Cannot create file folder");
         server = new ServerSocket();
         try {
             server.setReuseAddress(true);
-            server.bind(new InetSocketAddress(PORT));
+            server.bind(new InetSocketAddress(remote == null ? PORT : 47833));
         } catch (IOException error) {
             server.close();
             throw error;
         }
-        if (settings.getString("transfer_token", "").isEmpty()) renewCode();
+        if (remote == null && settings.getString("transfer_token", "").isEmpty()) renewCode();
         else code = "";
         new Thread(this::serve, "TVLink receiver").start();
     }
@@ -102,7 +112,13 @@ final class TransferServer implements AutoCloseable {
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         try {
             String operation = in.readUTF();
-            if ("PAIR".equals(operation)) {
+            if (remote != null) {
+                if (!"REMOTE".equals(operation)) throw new IOException("Unknown remote request");
+                String token = settings.getString("transfer_token", "");
+                if (token.isEmpty() || !equal(token, in.readUTF())) throw new IOException("Pair with TV again");
+                if (!remote.send(in.readUTF())) throw new IOException("TV could not perform this key on the current screen");
+                out.writeUTF("OK");
+            } else if ("PAIR".equals(operation)) {
                 pair(in.readUTF(), out);
             } else {
                 String token = settings.getString("transfer_token", "");
