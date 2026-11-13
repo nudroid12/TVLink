@@ -20,12 +20,10 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final boolean TV = false;
 
-    private boolean malay;
     private boolean showingHome;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        malay = getPreferences(MODE_PRIVATE).getBoolean("malay", false);
         home();
     }
 
@@ -75,24 +73,6 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private String label(String english, String bahasaMelayu) {
-        return malay ? bahasaMelayu : english;
-    }
-
-    private void chooseLanguage() {
-        new AlertDialog.Builder(this)
-                .setTitle(label("Language", "Bahasa"))
-                .setSingleChoiceItems(new String[] {"English", "Bahasa Melayu"}, malay ? 1 : 0,
-                        (dialog, choice) -> {
-                            malay = choice == 1;
-                            getPreferences(MODE_PRIVATE).edit().putBoolean("malay", malay).apply();
-                            dialog.dismiss();
-                            home();
-                        })
-                .setNegativeButton(label("Cancel", "Batal"), null)
-                .show();
-    }
-
     private void home() {
         showingHome = true;
         LinearLayout page = screen(null);
@@ -105,9 +85,8 @@ public class MainActivity extends Activity {
         wordmark.setContentDescription("TVLink");
         header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button language = button(label("EN", "BM"), this::chooseLanguage);
-        language.setContentDescription(label("Language: English", "Bahasa: Bahasa Melayu"));
-        header.addView(language, new LinearLayout.LayoutParams(dp(56), dp(48)));
+        Button pair = button(hasFilePairing() && hasRemotePairing() ? "Paired" : "Pair", this::pairMenu);
+        header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
 
         android.view.View divider = new android.view.View(this);
         divider.setBackgroundColor(0xff303c56);
@@ -118,8 +97,8 @@ public class MainActivity extends Activity {
         LinearLayout menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.HORIZONTAL);
         page.addView(menu, new LinearLayout.LayoutParams(-1, -2));
-        String[] titles = {label("Send", "Hantar"), "Remote", label("Files", "Fail")};
-        Runnable[] actions = {this::showSend, this::showRemote, this::showFiles};
+        String[] titles = {"Send", "Remote", "Files"};
+        Runnable[] actions = {this::openSend, this::openRemote, this::showFiles};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Button first = null;
         for (int index = 0; index < titles.length; index++) {
@@ -161,7 +140,7 @@ public class MainActivity extends Activity {
     private LinearLayout feature(String title) {
         showingHome = false;
         LinearLayout page = screen(title);
-        page.addView(button(label("Back", "Kembali"), this::home));
+        page.addView(button("Back", this::home));
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout body = new LinearLayout(this);
@@ -212,12 +191,44 @@ public class MainActivity extends Activity {
         if (!isFinishing() && !isDestroyed()) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
+    private boolean hasFilePairing() {
+        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+        return !settings.getString("host", "").isEmpty() && !settings.getString("token", "").isEmpty();
+    }
+
+    private boolean hasRemotePairing() {
+        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+        return !settings.getString("remote_host", "").isEmpty() && !settings.getString("remote_pin", "").isEmpty();
+    }
+
+    private void pairMenu() {
+        String[] choices = {
+                "File transfer" + (hasFilePairing() ? " · Paired" : ""),
+                "System remote" + (hasRemotePairing() ? " · Paired" : "")
+        };
+        new AlertDialog.Builder(this).setTitle("Pair TV")
+                .setItems(choices, (dialog, choice) -> {
+                    if (choice == 0) pairTv(this::home);
+                    else pairSystemRemote(this::home);
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void openSend() {
+        if (hasFilePairing()) showSend();
+        else pairTv(this::showSend);
+    }
+
+    private void openRemote() {
+        if (hasRemotePairing()) showRemote();
+        else pairSystemRemote(this::showRemote);
+    }
+
     private void showSend() {
-        LinearLayout body = feature(label("Send", "Hantar"));
-        info(body, label("Open Receive on the TV. Both devices must be on the same trusted network.",
-                "Buka Terima pada TV. Kedua-dua peranti mesti berada pada rangkaian dipercayai yang sama."));
-        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
-        body.addView(button(label("Choose file", "Pilih fail"), () -> {
+        LinearLayout body = feature("Send");
+        info(body, "Open Receive on the TV. Both devices must be on the same trusted network.");
+        body.addView(button("Pair TV", this::pairTv));
+        body.addView(button("Choose file", () -> {
             if (getPreferences(MODE_PRIVATE).getString("token", "").isEmpty()) {
                 pairTv();
                 return;
@@ -230,24 +241,29 @@ public class MainActivity extends Activity {
     }
 
     private void pairTv() {
+        pairTv(() -> {});
+    }
+
+    private void pairTv(Runnable paired) {
+        if (busy) return;
         LinearLayout inputs = new LinearLayout(this);
         inputs.setOrientation(LinearLayout.VERTICAL);
         EditText host = new EditText(this);
         host.setSingleLine(true);
-        host.setHint(label("TV IPv4 address", "Alamat IPv4 TV"));
+        host.setHint("TV IPv4 address");
         host.setText(getPreferences(MODE_PRIVATE).getString("host", ""));
         EditText code = new EditText(this);
-        code.setHint(label("Pairing code", "Kod pasangan"));
+        code.setHint("Pairing code");
         code.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         inputs.addView(host);
         inputs.addView(code);
-        new AlertDialog.Builder(this).setTitle(label("Pair TV", "Pasangkan TV")).setView(inputs)
-                .setNegativeButton(label("Cancel", "Batal"), null)
-                .setPositiveButton(label("Pair", "Pasangkan"), (dialog, which) -> {
+        new AlertDialog.Builder(this).setTitle("Pair file transfer").setMessage("On the same Wi-Fi, open TVLink → Receive on your TV. Enter the IP and eight-digit code shown there.").setView(inputs)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Pair", (dialog, which) -> {
                     String ip = host.getText().toString().trim();
                     String pin = code.getText().toString().trim();
                     if (!android.util.Patterns.IP_ADDRESS.matcher(ip).matches() || !pin.matches("[0-9]{8}")) {
-                        notifyUser(label("Enter the TV address and eight-digit code.", "Masukkan alamat TV dan kod lapan digit."));
+                        notifyUser("Enter the TV address and eight-digit code.");
                         return;
                     }
                     android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
@@ -255,7 +271,9 @@ public class MainActivity extends Activity {
                         try (TransferClient client = new TransferClient(ip, "PAIR", pin)) {
                             settings.edit().putString("host", ip).putString("token", client.pair()).apply();
                         }
-                        runOnUiThread(() -> notifyUser(label("TV paired", "TV dipasangkan")));
+                    }, () -> {
+                        notifyUser("TV paired");
+                        paired.run();
                     });
                 }).show();
     }
@@ -272,8 +290,8 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request != 10 || result != RESULT_OK || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
-        LinearLayout body = feature(label("Send", "Hantar"));
-        TextView progress = info(body, label("Preparing file…", "Menyediakan fail…"));
+        LinearLayout body = feature("Send");
+        TextView progress = info(body, "Preparing file…");
         work(() -> {
             String name;
             long size;
@@ -292,21 +310,21 @@ public class MainActivity extends Activity {
                 client.send(name, size, stream, percent -> runOnUiThread(() ->
                         progress.setText(name + " · " + percent + "%")));
             }
-            runOnUiThread(() -> progress.setText(label("Sent: ", "Dihantar: ") + name));
+            runOnUiThread(() -> progress.setText("Sent: " + name));
         });
     }
 
     private void showFiles() {
         if (busy) return;
-        LinearLayout body = feature(label("Files on TV", "Fail di TV"));
-        body.addView(button(label("Refresh", "Muat semula"), this::showFiles));
-        body.addView(button(label("Pair TV", "Pasangkan TV"), this::pairTv));
+        LinearLayout body = feature("Files on TV");
+        body.addView(button("Refresh", this::showFiles));
+        body.addView(button("Pair TV", this::pairTv));
         work(() -> {
             try (TransferClient client = client("LIST")) {
                 java.util.List<String> files = client.list();
                 java.util.Collections.sort(files, String.CASE_INSENSITIVE_ORDER);
                 runOnUiThread(() -> {
-                    if (files.isEmpty()) info(body, label("No files received yet", "Belum ada fail diterima"));
+                    if (files.isEmpty()) info(body, "No files received yet");
                     for (String name : files) body.addView(button(name, () -> fileActions(name)));
                 });
             }
@@ -315,19 +333,19 @@ public class MainActivity extends Activity {
 
     private void fileActions(String name) {
         new AlertDialog.Builder(this).setTitle(name)
-                .setItems(new String[] {label("Rename", "Tukar nama"), label("Delete", "Padam")}, (dialog, choice) -> {
+                .setItems(new String[] {"Rename", "Delete"}, (dialog, choice) -> {
                     if (choice == 0) {
                         EditText input = new EditText(this);
                         input.setSingleLine(true);
                         input.setText(name);
-                        new AlertDialog.Builder(this).setTitle(label("Rename", "Tukar nama")).setView(input)
-                                .setNegativeButton(label("Cancel", "Batal"), null)
-                                .setPositiveButton(label("Save", "Simpan"), (d, w) ->
+                        new AlertDialog.Builder(this).setTitle("Rename").setView(input)
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Save", (d, w) ->
                                         changeFile("RENAME", name, input.getText().toString().trim())).show();
                     } else {
-                        new AlertDialog.Builder(this).setTitle(label("Delete file?", "Padam fail?")).setMessage(name)
-                                .setNegativeButton(label("Cancel", "Batal"), null)
-                                .setPositiveButton(label("Delete", "Padam"), (d, w) -> changeFile("DELETE", name)).show();
+                        new AlertDialog.Builder(this).setTitle("Delete file?").setMessage(name)
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Delete", (d, w) -> changeFile("DELETE", name)).show();
                     }
                 }).show();
     }
@@ -349,24 +367,27 @@ public class MainActivity extends Activity {
 
     private void showRemote() {
         LinearLayout body = feature("Remote");
-        info(body, label("Connect to Android TV Remote Service over Wi-Fi.",
-                "Sambung ke Android TV Remote Service melalui Wi-Fi."));
-        body.addView(button(label("Pair system remote", "Pasangkan remote sistem"), this::pairSystemRemote));
+        info(body, "Connect to Android TV Remote Service over Wi-Fi.");
+        body.addView(button("Pair system remote", this::pairSystemRemote));
         remoteRow(body, new String[] {"↑"}, new int[] {19});
         remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {21, 23, 22});
         remoteRow(body, new String[] {"↓"}, new int[] {20});
-        remoteRow(body, new String[] {label("Back", "Kembali"), label("Home", "Utama")}, new int[] {4, 3});
+        remoteRow(body, new String[] {"Back", "Home"}, new int[] {4, 3});
     }
 
     private void pairSystemRemote() {
+        pairSystemRemote(() -> {});
+    }
+
+    private void pairSystemRemote(Runnable paired) {
         if (remotePairing) return;
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         EditText ip = new EditText(this);
         ip.setSingleLine(true);
         ip.setHint("TV IP address");
         ip.setText(prefs.getString("remote_host", prefs.getString("host", "")));
-        new AlertDialog.Builder(this).setTitle("Pair system remote").setView(ip)
-                .setNegativeButton(label("Cancel", "Batal"), null)
+        new AlertDialog.Builder(this).setTitle("Pair system remote").setMessage("Use the same Wi-Fi as your TV. Enter its IP address to show a pairing code on Android TV.").setView(ip)
+                .setNegativeButton("Cancel", null)
                 .setPositiveButton("Connect", (dialog, which) -> {
                     String host = ip.getText().toString().trim();
                     if (!android.util.Patterns.IP_ADDRESS.matcher(host).matches()) {
@@ -380,7 +401,7 @@ public class MainActivity extends Activity {
                             pairing = new AndroidTvRemote(host, true, "");
                             pairing.beginPairing();
                             AndroidTvRemote pending = pairing;
-                            runOnUiThread(() -> enterRemoteCode(pending, host));
+                            runOnUiThread(() -> enterRemoteCode(pending, host, paired));
                         } catch (Exception error) {
                             if (pairing != null) pairing.close();
                             runOnUiThread(() -> {
@@ -392,7 +413,7 @@ public class MainActivity extends Activity {
                 }).show();
     }
 
-    private void enterRemoteCode(AndroidTvRemote pairing, String host) {
+    private void enterRemoteCode(AndroidTvRemote pairing, String host, Runnable paired) {
         if (isFinishing() || isDestroyed()) {
             pairing.close();
             return;
@@ -400,7 +421,7 @@ public class MainActivity extends Activity {
         EditText code = new EditText(this);
         code.setSingleLine(true);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Enter the code shown on TV").setView(code)
-                .setNegativeButton(label("Cancel", "Batal"), null)
+                .setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", null).create();
         dialog.setOnDismissListener(ignored -> {
             pairing.close();
@@ -421,7 +442,11 @@ public class MainActivity extends Activity {
                     getPreferences(MODE_PRIVATE).edit().putString("remote_host", host)
                             .putString("remote_pin", pin).apply();
                     closeSystemRemote();
-                    runOnUiThread(() -> notifyUser("System remote paired"));
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || isFinishing()) return;
+                        notifyUser("System remote paired");
+                        paired.run();
+                    });
                 } catch (Exception error) {
                     runOnUiThread(() -> notifyUser("Pairing failed: " + error.getMessage()));
                 } finally {

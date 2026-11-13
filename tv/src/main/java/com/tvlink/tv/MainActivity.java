@@ -21,13 +21,11 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final boolean TV = true;
 
-    private boolean malay;
     private boolean showingHome;
     private boolean receivingScreen;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        malay = getPreferences(MODE_PRIVATE).getBoolean("malay", false);
         home();
     }
 
@@ -77,24 +75,6 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private String label(String english, String bahasaMelayu) {
-        return malay ? bahasaMelayu : english;
-    }
-
-    private void chooseLanguage() {
-        new AlertDialog.Builder(this)
-                .setTitle(label("Language", "Bahasa"))
-                .setSingleChoiceItems(new String[] {"English", "Bahasa Melayu"}, malay ? 1 : 0,
-                        (dialog, choice) -> {
-                            malay = choice == 1;
-                            getPreferences(MODE_PRIVATE).edit().putBoolean("malay", malay).apply();
-                            dialog.dismiss();
-                            home();
-                        })
-                .setNegativeButton(label("Cancel", "Batal"), null)
-                .show();
-    }
-
     private void home() {
         receivingScreen = false;
         stopPairingDisplay();
@@ -109,9 +89,8 @@ public class MainActivity extends Activity {
         wordmark.setContentDescription("TVLink");
         header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button language = button(label("EN", "BM"), this::chooseLanguage);
-        language.setContentDescription(label("Language: English", "Bahasa: Bahasa Melayu"));
-        header.addView(language, new LinearLayout.LayoutParams(dp(56), dp(48)));
+        Button pair = button("Pair", this::showReceive);
+        header.addView(pair, new LinearLayout.LayoutParams(dp(76), dp(48)));
 
         android.view.View divider = new android.view.View(this);
         divider.setBackgroundColor(0xff303c56);
@@ -122,7 +101,7 @@ public class MainActivity extends Activity {
         LinearLayout menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.HORIZONTAL);
         page.addView(menu, new LinearLayout.LayoutParams(-1, -2));
-        String[] titles = {label("Receive", "Terima"), "Remote", label("Files", "Fail")};
+        String[] titles = {"Receive", "Remote", "Files"};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Button first = null;
@@ -167,8 +146,8 @@ public class MainActivity extends Activity {
             if (pairing == null || receiver == null) return;
             String code = receiver.currentCode();
             pairing.setText(code.isEmpty()
-                    ? label("Phone paired. Ready to receive.", "Telefon dipasangkan. Sedia menerima.")
-                    : label("Pairing code: ", "Kod pasangan: ") + code);
+                    ? "Phone paired. Ready to receive."
+                    : "Pairing code: " + code);
             refresh.postDelayed(this, 500);
         }
     };
@@ -182,7 +161,7 @@ public class MainActivity extends Activity {
         stopPairingDisplay();
         showingHome = false;
         LinearLayout page = screen(title);
-        Button back = button(label("Back", "Kembali"), this::home);
+        Button back = button("Back", this::home);
         page.addView(back);
         back.requestFocus();
         ScrollView scroll = new ScrollView(this);
@@ -201,27 +180,26 @@ public class MainActivity extends Activity {
     }
 
     private void showReceive() {
-        LinearLayout body = feature(label("Receive", "Terima"));
+        LinearLayout body = feature("Receive");
         receivingScreen = true;
         try {
             if (receiver == null) receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
         } catch (IOException error) {
-            info(body, label("Cannot start receiver: ", "Penerima gagal dimulakan: ") + error.getMessage());
+            info(body, "Cannot start receiver: " + error.getMessage());
             return;
         }
-        info(body, label("TV IPv4: ", "IPv4 TV: ") + localAddresses());
-        info(body, label("Keep TVLink open while transferring over your trusted network.",
-                "Biarkan TVLink terbuka semasa pindahan melalui rangkaian dipercayai."));
+        info(body, "TV IPv4: " + localAddresses());
+        info(body, "Keep TVLink open while transferring over your trusted network.");
         pairing = new TextView(this);
         pairing.setTextSize(24);
         body.addView(pairing);
         updatePairing.run();
-        body.addView(button(label("New pairing code", "Kod pasangan baharu"), () -> {
+        body.addView(button("New pairing code", () -> {
             receiver.renewCode();
             refresh.removeCallbacks(updatePairing);
             updatePairing.run();
         }));
-        body.addView(button(label("Forget paired phone", "Lupakan telefon dipasangkan"), () -> receiver.forgetPhone()));
+        body.addView(button("Forget paired phone", () -> receiver.forgetPhone()));
     }
 
     private String localAddresses() {
@@ -238,22 +216,21 @@ public class MainActivity extends Activity {
                 }
             }
         } catch (IOException ignored) {}
-        return addresses.isEmpty() ? label("Check network settings", "Semak tetapan rangkaian")
+        return addresses.isEmpty() ? "Check network settings"
                 : android.text.TextUtils.join(" / ", addresses);
     }
 
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
-        info(body, label("On your phone, open Remote and select Pair system remote. Enter the code shown by Android TV.",
-                "Di telefon, buka Remote dan pilih Pasangkan remote sistem. Masukkan kod yang dipaparkan oleh Android TV."));
+        info(body, "On your phone, open Remote and select Pair system remote. Enter the code shown by Android TV.");
     }
 
     private void showFiles() {
-        LinearLayout body = feature(label("Files", "Fail"));
-        body.addView(button(label("Refresh", "Muat semula"), this::showFiles));
+        LinearLayout body = feature("Files");
+        body.addView(button("Refresh", this::showFiles));
         File[] files = received().listFiles(f -> f.isFile() && !f.getName().startsWith("."));
         if (files == null || files.length == 0) {
-            info(body, label("No files received yet", "Belum ada fail diterima"));
+            info(body, "No files received yet");
             return;
         }
         java.util.Arrays.sort(files, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
@@ -263,17 +240,17 @@ public class MainActivity extends Activity {
     private void fileActions(File file) {
         boolean apk = file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
         new AlertDialog.Builder(this).setTitle(file.getName()).setItems(new String[] {
-                apk ? label("Install APK", "Pasang APK") : label("Open", "Buka"),
-                label("Rename", "Tukar nama"), label("Delete", "Padam")
+                apk ? "Install APK" : "Open",
+                "Rename", "Delete"
         }, (d, choice) -> {
             switch (choice) {
                 case 0: openFile(file, apk); break;
                 case 1: renameFile(file); break;
                 case 2:
-                    new AlertDialog.Builder(this).setTitle(label("Delete file?", "Padam fail?"))
-                            .setMessage(file.getName()).setNegativeButton(label("Cancel", "Batal"), null)
-                            .setPositiveButton(label("Delete", "Padam"), (dialog, which) -> {
-                                if (!file.delete()) notifyUser(label("Could not delete file", "Fail gagal dipadam"));
+                    new AlertDialog.Builder(this).setTitle("Delete file?")
+                            .setMessage(file.getName()).setNegativeButton("Cancel", null)
+                            .setPositiveButton("Delete", (dialog, which) -> {
+                                if (!file.delete()) notifyUser("Could not delete file");
                                 showFiles();
                             }).show();
                     break;
@@ -285,9 +262,9 @@ public class MainActivity extends Activity {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setText(file.getName());
-        new AlertDialog.Builder(this).setTitle(label("Rename", "Tukar nama")).setView(input)
-                .setNegativeButton(label("Cancel", "Batal"), null)
-                .setPositiveButton(label("Save", "Simpan"), (d, choice) -> {
+        new AlertDialog.Builder(this).setTitle("Rename").setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (d, choice) -> {
                     try {
                         File target = TransferServer.file(received(), input.getText().toString().trim());
                         if (!target.equals(file)) {
@@ -303,8 +280,7 @@ public class MainActivity extends Activity {
     private void openFile(File file, boolean apk) {
         try {
             if (apk && android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-                notifyUser(label("Allow TVLink to install unknown apps, then select the APK again.",
-                        "Benarkan TVLink memasang aplikasi tidak diketahui, kemudian pilih APK semula."));
+                notifyUser("Allow TVLink to install unknown apps, then select the APK again.");
                 startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         android.net.Uri.parse("package:" + getPackageName())));
                 return;
@@ -315,7 +291,7 @@ public class MainActivity extends Activity {
             startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
         } catch (android.content.ActivityNotFoundException | SecurityException error) {
-            notifyUser(label("No compatible app or installer available", "Tiada aplikasi atau pemasang yang serasi"));
+            notifyUser("No compatible app or installer available");
         }
     }
 
