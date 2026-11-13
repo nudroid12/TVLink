@@ -1,0 +1,113 @@
+name: TVLink Build APKs
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: APK untuk dibina
+        type: choice
+        options: [both, mob, tv]
+        default: both
+  workflow_run:
+    workflows: [Apply ZIP Patch]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && 'main' || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve source and build scope
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SOURCE: ${{ github.event.workflow_run.head_sha }}
+          REQUEST: ${{ inputs.scope }}
+        run: |
+          set -euo pipefail
+          mob=false
+          tv=false
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            case "$REQUEST" in
+              both) mob=true; tv=true ;;
+              mob) mob=true ;;
+              tv) tv=true ;;
+              *) exit 1 ;;
+            esac
+          elif git merge-base --is-ancestor "$SOURCE" HEAD; then
+            while IFS= read -r commit; do
+              if [[ "$(git rev-parse "$commit^")" == "$SOURCE" &&
+                    "$(git log -1 --format=%s "$commit")" == 'Apply TVLink patch [zip-applied]' ]]; then
+                git checkout --detach "$commit"
+                while IFS= read -r -d '' path; do
+                  case "$path" in
+                    mob/*) mob=true ;;
+                    tv/*) tv=true ;;
+                    shared/*|settings.gradle.kts|build.gradle.kts|gradle.properties) mob=true; tv=true ;;
+                  esac
+                done < <(git diff --name-only --no-renames -z "$SOURCE" "$commit")
+                break
+              fi
+            done < <(git rev-list --first-parent --reverse "$SOURCE..HEAD")
+          fi
+          echo "mob=$mob" >> "$GITHUB_OUTPUT"
+          echo "tv=$tv" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v5
+        if: steps.scope.outputs.mob == 'true' || steps.scope.outputs.tv == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.scope.outputs.mob == 'true' || steps.scope.outputs.tv == 'true'
+        with:
+          gradle-version: '8.9'
+
+      - name: Build and verify debug APKs
+        if: steps.scope.outputs.mob == 'true' || steps.scope.outputs.tv == 'true'
+        shell: bash
+        env:
+          MOB: ${{ steps.scope.outputs.mob }}
+          TV: ${{ steps.scope.outputs.tv }}
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
+          sdkmanager --install 'platforms;android-35' 'build-tools;34.0.0'
+          tasks=()
+          if [[ "$MOB" == true ]]; then tasks+=(:mob:assembleDebug); fi
+          if [[ "$TV" == true ]]; then tasks+=(:tv:assembleDebug); fi
+          gradle "${tasks[@]}" --stacktrace
+          mkdir -p dist
+          for module in mob tv; do
+            if [[ "$module" == mob && "$MOB" != true ]] || [[ "$module" == tv && "$TV" != true ]]; then
+              continue
+            fi
+            apk="$module/build/outputs/apk/debug/$module-debug.apk"
+            "$sdk/build-tools/34.0.0/apksigner" verify "$apk"
+            cp "$apk" "dist/TVLink-${module^^}-debug.apk"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.mob == 'true'
+        with:
+          name: TVLink-MOB-debug
+          path: dist/TVLink-MOB-debug.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.tv == 'true'
+        with:
+          name: TVLink-TV-debug
+          path: dist/TVLink-TV-debug.apk
+          if-no-files-found: error
