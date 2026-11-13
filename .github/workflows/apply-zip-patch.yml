@@ -2,7 +2,8 @@ name: Apply ZIP Patch
 on:
   push:
     branches: [main]
-    paths: [TVLink-Patch.zip]
+    paths:
+      - '*.[zZ][iI][pP]'
   workflow_dispatch:
 
 permissions:
@@ -22,11 +23,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f TVLink-Patch.zip ]]; then
-            echo "No TVLink-Patch.zip at this commit."
+          shopt -s nullglob nocaseglob
+          patches=()
+          for candidate in *tvlink*.zip; do
+            if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+              patches+=("$candidate")
+            fi
+          done
+          if (( ${#patches[@]} == 0 )); then
+            echo "No TVLink ZIP patch in the repository root."
             exit 0
           fi
-          python3 - TVLink-Patch.zip <<'PYTHON'
+          if (( ${#patches[@]} > 1 )); then
+            echo "::error::Multiple TVLink ZIP patches in the repository root. Keep only the patch you want to apply."
+            printf '  %s\n' "${patches[@]}"
+            exit 1
+          fi
+          patch="${patches[0]}"
+          python3 - "$patch" <<'PYTHON'
           """Overlay root-relative TVLink application files from a ZIP."""
           import stat
           import sys
@@ -64,7 +78,7 @@ jobs:
                   destination.parent.mkdir(parents=True, exist_ok=True)
                   destination.write_bytes(archive.read(entry))
           PYTHON
-          git rm -- TVLink-Patch.zip
+          git --literal-pathspecs rm -- "$patch"
           git add --all
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
