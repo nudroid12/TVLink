@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff3a4b6b);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff82aaff);
         return shape;
     }
 
@@ -233,24 +233,38 @@ public class MainActivity extends Activity {
 
     private void showTransfers() {
         LinearLayout body = feature("Send / Receive");
-        if (!hasFilePairing()) {
-            body.addView(button("Pair TV", () -> pairSystemRemote(this::showTransfers)));
-        } else {
-            body.addView(button("Choose file to send", this::chooseFileToSend));
-            if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
-                info(body, "Receive Transfers is disabled in Settings.");
-            } else {
-                startReceiver();
-                info(body, receiver == null ? "Could not start receiver." : "Ready to receive from " + linkedTvName() + ".");
-            }
+        addTransferHeading(body, "Send");
+        Button send = hasFilePairing() ? button("Send file", this::chooseFileToSend)
+                : button("Pair TV", () -> pairSystemRemote(this::showTransfers));
+        send.setPadding(dp(16), 0, dp(16), 0);
+        body.addView(send, new LinearLayout.LayoutParams(-2, dp(48)));
+        divider(body);
+        addTransferHeading(body, "Receive");
+        if (getPreferences(MODE_PRIVATE).getBoolean("receive", true) && hasFilePairing()) {
+            startReceiver();
         }
-        renderTransfers(info(body, ""));
+        addTransferDetails(body, body);
     }
 
     private void home() {
         remoteStatus = null;
         showingHome = true;
         LinearLayout page = screen(null);
+        addHeader(page);
+
+        LinearLayout menu = new LinearLayout(this);
+        menu.setOrientation(LinearLayout.VERTICAL);
+        menu.setGravity(Gravity.CENTER);
+        ScrollView cards = new ScrollView(this);
+        cards.setFillViewport(true);
+        page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
+        cards.addView(menu);
+        addHomeCard(menu, "Send / Receive", R.drawable.ic_send, this::showTransfers);
+        addHomeCard(menu, "Remote", R.drawable.ic_remote, this::openRemote);
+        addHomeCard(menu, "Files", R.drawable.ic_files, this::showFiles);
+    }
+
+    private void addHeader(LinearLayout page) {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setMinimumHeight(dp(52));
@@ -293,16 +307,6 @@ public class MainActivity extends Activity {
         line.setMargins(0, dp(14), 0, dp(18));
         page.addView(divider, line);
 
-        LinearLayout menu = new LinearLayout(this);
-        menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setGravity(Gravity.CENTER);
-        ScrollView cards = new ScrollView(this);
-        cards.setFillViewport(true);
-        page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
-        cards.addView(menu);
-        addHomeCard(menu, "Send / Receive", R.drawable.ic_send, this::showTransfers);
-        addHomeCard(menu, "Remote", R.drawable.ic_remote, this::openRemote);
-        addHomeCard(menu, "Files", R.drawable.ic_files, this::showFiles);
     }
 
     private void addHomeCard(LinearLayout menu, String title, int iconResource, Runnable action) {
@@ -355,7 +359,12 @@ public class MainActivity extends Activity {
 
     private LinearLayout feature(String title) {
         showingHome = false;
-        LinearLayout page = screen(title);
+        LinearLayout page = screen("Send / Receive".equals(title) ? null : title);
+        if ("Send / Receive".equals(title)) {
+            addHeader(page);
+            TextView heading = addTransferHeading(page, title);
+            heading.setTextSize(24);
+        }
         if (!"Send / Receive".equals(title) && !"My Files".equals(title) && !"Device".equals(title)) {
             page.addView(button("Back", this::home));
         }
@@ -599,29 +608,81 @@ public class MainActivity extends Activity {
         return session;
     }
 
-    private void renderTransfers(TextView view) {
+    private TextView addTransferHeading(LinearLayout parent, String label) {
+        TextView heading = new TextView(this);
+        heading.setText(label);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(20);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        heading.setPadding(0, dp(8), 0, dp(8));
+        parent.addView(heading);
+        return heading;
+    }
+
+    private void addTransferDetails(LinearLayout body, LinearLayout receive) {
+        TextView status = info(receive, "");
+        status.setTextColor(Color.WHITE);
+        android.widget.ProgressBar progress = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);
+        progress.setVisibility(android.view.View.GONE);
+        receive.addView(progress, new LinearLayout.LayoutParams(-1, dp(12)));
+        divider(body);
+        addTransferHeading(body, "Transfer history");
+        LinearLayout history = new LinearLayout(this);
+        history.setOrientation(LinearLayout.VERTICAL);
+        body.addView(history);
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        Runnable refreshTransfers = new Runnable() {
-            public void run() {
-                if (!view.isAttachedToWindow()) return;
+        java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance(
+                java.text.DateFormat.SHORT, java.text.DateFormat.SHORT);
+        java.util.regex.Pattern percent = java.util.regex.Pattern.compile(" · (\\d{1,3})%$");
+        Runnable refresh = new Runnable() {
+            private String lastHistory;
+
+            @Override public void run() {
+                if (!body.isAttachedToWindow()) return;
+                boolean enabled = prefs.getBoolean("receive", true);
+                boolean paired = hasFilePairing();
                 String incoming = receiver == null ? "" : receiver.receiveProgress;
-                String sending = activeSend != null ? "\nSending · see transfer dialog" : "";
-                StringBuilder text = new StringBuilder(incoming.isEmpty() ? "No active incoming transfer"
-                        : "Receiving: " + incoming).append(sending).append("\n\nTransfer history");
-                org.json.JSONArray latest = TransferHistory.read(prefs);
-                if (latest.length() == 0) text.append("\nNo transfers yet");
-                for (int i = 0; i < latest.length(); i++) {
-                    org.json.JSONObject item = latest.optJSONObject(i);
-                    if (item != null) text.append("\n").append(item.optString("outcome")).append("  ·  ")
-                            .append(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,
-                                    java.text.DateFormat.SHORT).format(new java.util.Date(item.optLong("time"))));
+                String message;
+                if (!incoming.isEmpty()) message = incoming;
+                else if (!enabled) message = "Receive Transfers is disabled in Settings.";
+                else if (!paired) message = "Pair to receive files.";
+                else if (receiver == null) message = "Could not start receiver.";
+                else message = "●  Ready to receive from " + linkedTvName() + ".";
+                if (!message.contentEquals(status.getText())) {
+                    android.text.SpannableString label = new android.text.SpannableString(message);
+                    if (message.startsWith("●  Ready")) {
+                        label.setSpan(new android.text.style.ForegroundColorSpan(FOCUS_BLUE), 0, 1,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    status.setText(label);
                 }
-                String value = text.toString();
-                if (!value.contentEquals(view.getText())) view.setText(value);
-                view.postDelayed(this, 500);
+
+                java.util.regex.Matcher match = percent.matcher(incoming);
+                boolean active = match.find();
+                progress.setVisibility(active ? android.view.View.VISIBLE : android.view.View.GONE);
+                if (active) progress.setProgress(Integer.parseInt(match.group(1)));
+
+                org.json.JSONArray entries = TransferHistory.read(prefs);
+                String snapshot = entries.toString();
+                if (!snapshot.equals(lastHistory)) {
+                    lastHistory = snapshot;
+                    history.removeAllViews();
+                    if (entries.length() == 0) info(history, "No transfers yet");
+                    for (int index = 0; index < entries.length(); index++) {
+                        org.json.JSONObject item = entries.optJSONObject(index);
+                        if (item == null) continue;
+                        TextView row = info(history, item.optString("outcome") + "\n"
+                                + dates.format(new java.util.Date(item.optLong("time"))));
+                        row.setTextColor(Color.WHITE);
+                        if (index + 1 < entries.length()) divider(history);
+                    }
+                }
+                body.postDelayed(this, 500);
             }
         };
-        view.post(refreshTransfers);
+        body.post(refresh);
     }
 
     private void finishSend(SendSession session, String outcome) {

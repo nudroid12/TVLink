@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff3a4b6b);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff82aaff);
         return shape;
     }
 
@@ -188,7 +188,8 @@ public class MainActivity extends Activity {
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
         boolean showBack = !"Pair".equals(title) && !"Remote".equals(title)
-                && !"My Files".equals(title) && !"Settings".equals(title);
+                && !"My Files".equals(title) && !"Settings".equals(title)
+                && !"Send / Receive".equals(title);
         if (showBack) {
             titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
         }
@@ -493,19 +494,34 @@ public class MainActivity extends Activity {
 
     private void showReceive() {
         LinearLayout body = feature("Send / Receive");
-        body.addView(button("Send file", this::chooseFileToSend));
-        TextView transfers = new TextView(this);
-        transfers.setTextColor(Color.WHITE);
-        transfers.setTextSize(17);
-        body.addView(transfers);
-        renderTransfers(transfers);
-        if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
-            info(body, "Receive Transfers is disabled in Settings.");
-        } else if (!isLinked()) {
-            startPairing(body, false);
-        } else {
-            info(body, startReceiver() ? "Ready to receive from your linked phone." : "Could not start receiver.");
+        LinearLayout columns = new LinearLayout(this);
+        columns.setPadding(0, dp(12), 0, dp(12));
+        body.addView(columns, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout send = new LinearLayout(this);
+        send.setOrientation(LinearLayout.VERTICAL);
+        columns.addView(send, new LinearLayout.LayoutParams(0, -2, 2));
+        addTransferHeading(send, "Send");
+        Button sendFile = button("Send file", this::chooseFileToSend);
+        sendFile.setBackground(highlightOnFocus(0xff1b2740));
+        sendFile.setTextColor(new android.content.res.ColorStateList(
+                new int[][] {{android.R.attr.state_focused}, {}}, new int[] {0xff0c1c35, Color.WHITE}));
+        send.addView(sendFile, new LinearLayout.LayoutParams(dp(160), dp(48)));
+
+        android.view.View rule = new android.view.View(this);
+        rule.setBackgroundColor(0xff82aaff);
+        LinearLayout.LayoutParams ruleSize = new LinearLayout.LayoutParams(dp(1), -1);
+        ruleSize.setMargins(dp(20), 0, dp(20), 0);
+        columns.addView(rule, ruleSize);
+        LinearLayout receive = new LinearLayout(this);
+        receive.setOrientation(LinearLayout.VERTICAL);
+        columns.addView(receive, new LinearLayout.LayoutParams(0, -2, 3));
+        addTransferHeading(receive, "Receive");
+        if (getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+            if (isLinked()) startReceiver();
+            else startPairing(receive, false);
         }
+        addTransferDetails(body, receive);
+        sendFile.requestFocus();
     }
 
     private void sendFile(File file) {
@@ -571,29 +587,81 @@ public class MainActivity extends Activity {
         return session;
     }
 
-    private void renderTransfers(TextView view) {
+    private TextView addTransferHeading(LinearLayout parent, String label) {
+        TextView heading = new TextView(this);
+        heading.setText(label);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(20);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        heading.setPadding(0, dp(8), 0, dp(8));
+        parent.addView(heading);
+        return heading;
+    }
+
+    private void addTransferDetails(LinearLayout body, LinearLayout receive) {
+        TextView status = info(receive, "");
+        status.setTextColor(Color.WHITE);
+        android.widget.ProgressBar progress = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);
+        progress.setVisibility(android.view.View.GONE);
+        receive.addView(progress, new LinearLayout.LayoutParams(-1, dp(12)));
+        divider(body);
+        addTransferHeading(body, "Transfer history");
+        LinearLayout history = new LinearLayout(this);
+        history.setOrientation(LinearLayout.VERTICAL);
+        body.addView(history);
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        Runnable refreshTransfers = new Runnable() {
-            public void run() {
-                if (!view.isAttachedToWindow()) return;
+        java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance(
+                java.text.DateFormat.SHORT, java.text.DateFormat.SHORT);
+        java.util.regex.Pattern percent = java.util.regex.Pattern.compile(" · (\\d{1,3})%$");
+        Runnable refresh = new Runnable() {
+            private String lastHistory;
+
+            @Override public void run() {
+                if (!body.isAttachedToWindow()) return;
+                boolean enabled = prefs.getBoolean("receive", true);
+                boolean paired = isLinked();
                 String incoming = receiver == null ? "" : receiver.receiveProgress;
-                String sending = activeSend != null ? "\nSending · see transfer dialog" : "";
-                StringBuilder text = new StringBuilder(incoming.isEmpty() ? "No active incoming transfer"
-                        : "Receiving: " + incoming).append(sending).append("\n\nTransfer history");
-                org.json.JSONArray latest = TransferHistory.read(prefs);
-                if (latest.length() == 0) text.append("\nNo transfers yet");
-                for (int i = 0; i < latest.length(); i++) {
-                    org.json.JSONObject item = latest.optJSONObject(i);
-                    if (item != null) text.append("\n").append(item.optString("outcome")).append("  ·  ")
-                            .append(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,
-                                    java.text.DateFormat.SHORT).format(new java.util.Date(item.optLong("time"))));
+                String message;
+                if (!incoming.isEmpty()) message = incoming;
+                else if (!enabled) message = "Receive Transfers is disabled in Settings.";
+                else if (!paired) message = "Pair to receive files.";
+                else if (receiver == null) message = "Could not start receiver.";
+                else message = "●  Ready to receive from " + peerName() + ".";
+                if (!message.contentEquals(status.getText())) {
+                    android.text.SpannableString label = new android.text.SpannableString(message);
+                    if (message.startsWith("●  Ready")) {
+                        label.setSpan(new android.text.style.ForegroundColorSpan(FOCUS_BLUE), 0, 1,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    status.setText(label);
                 }
-                String value = text.toString();
-                if (!value.contentEquals(view.getText())) view.setText(value);
-                view.postDelayed(this, 500);
+
+                java.util.regex.Matcher match = percent.matcher(incoming);
+                boolean active = match.find();
+                progress.setVisibility(active ? android.view.View.VISIBLE : android.view.View.GONE);
+                if (active) progress.setProgress(Integer.parseInt(match.group(1)));
+
+                org.json.JSONArray entries = TransferHistory.read(prefs);
+                String snapshot = entries.toString();
+                if (!snapshot.equals(lastHistory)) {
+                    lastHistory = snapshot;
+                    history.removeAllViews();
+                    if (entries.length() == 0) info(history, "No transfers yet");
+                    for (int index = 0; index < entries.length(); index++) {
+                        org.json.JSONObject item = entries.optJSONObject(index);
+                        if (item == null) continue;
+                        TextView row = info(history, item.optString("outcome") + "\n"
+                                + dates.format(new java.util.Date(item.optLong("time"))));
+                        row.setTextColor(Color.WHITE);
+                        if (index + 1 < entries.length()) divider(history);
+                    }
+                }
+                body.postDelayed(this, 500);
             }
         };
-        view.post(refreshTransfers);
+        body.post(refresh);
     }
 
     private void finishSend(SendSession session, String outcome) {
@@ -701,7 +769,7 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), 0, dp(16), 0);
         row.setFocusable(true);
-        row.setOnClickListener(view -> fileActions(file));
+        row.setOnClickListener(view -> fileActions(file, view));
         row.setBackground(flatRowBackground());
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
@@ -746,27 +814,84 @@ public class MainActivity extends Activity {
         divider(body);
     }
 
-    private void fileActions(File file) {
-        boolean apk = file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
-        new AlertDialog.Builder(this).setTitle(file.getName()).setItems(new String[] {
-                apk ? "Install APK" : "Open",
-                "Rename", "Delete", "Send to phone", "Save a copy"
-        }, (d, choice) -> {
-            switch (choice) {
-                case 0: openFile(file, apk); break;
-                case 1: renameFile(file); break;
-                case 2:
-                    new AlertDialog.Builder(this).setTitle("Delete file?")
-                            .setMessage(file.getName()).setNegativeButton("Cancel", null)
-                            .setPositiveButton("Delete", (dialog, which) -> {
-                                if (!file.delete()) notifyUser("Could not delete file");
-                                showFiles();
-                            }).show();
-                    break;
-                case 3: sendFile(file); break;
-                case 4: chooseExportLocation(file); break;
-            }
-        }).show();
+    private void fileActions(File file, android.view.View source) {
+        String filename = file.getName();
+        int dot = filename.lastIndexOf('.');
+        String type = dot > 0 && dot + 1 < filename.length()
+                ? filename.substring(dot + 1).toUpperCase(java.util.Locale.ROOT) : "File";
+        boolean apk = "APK".equals(type);
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(12), dp(16), dp(12));
+        panel.setBackground(tile(0xff1b2740, false));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(panel);
+        dialog.setContentView(scroll);
+        dialog.setOnDismissListener(closed -> {
+            if (source.isAttachedToWindow()) source.requestFocus();
+        });
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(heading);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_document);
+        icon.setColorFilter(Color.WHITE);
+        heading.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12), 0, 0, 0);
+        heading.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView title = addTransferHeading(labels, filename);
+        title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        info(labels, type + " · " + android.text.format.Formatter.formatShortFileSize(this, file.length()));
+        divider(panel);
+
+        Button open = addFileAction(panel, dialog, apk ? "Install APK" : "Open", R.drawable.ic_file_open,
+                Color.WHITE, () -> openFile(file, apk));
+        addFileAction(panel, dialog, "Rename", R.drawable.ic_file_rename, Color.WHITE, () -> renameFile(file));
+        addFileAction(panel, dialog, "Send to phone", R.drawable.ic_phone, Color.WHITE, () -> sendFile(file));
+        addFileAction(panel, dialog, "Save a copy", R.drawable.ic_file_copy, Color.WHITE,
+                () -> chooseExportLocation(file));
+        addFileAction(panel, dialog, "Delete", R.drawable.ic_file_delete, 0xffff8585,
+                () -> new AlertDialog.Builder(this).setTitle("Delete file?")
+                        .setMessage(filename).setNegativeButton("Cancel", null)
+                        .setPositiveButton("Delete", (confirm, which) -> {
+                            if (!file.delete()) notifyUser("Could not delete file");
+                            showFiles();
+                        }).show());
+
+        dialog.show();
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(.55f);
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            window.setLayout(Math.min(dp(560), metrics.widthPixels - dp(48)),
+                    Math.min(dp(382), metrics.heightPixels - dp(40)));
+        }
+        open.requestFocus();
+    }
+
+    private Button addFileAction(LinearLayout panel, android.app.Dialog dialog, String title,
+                                 int icon, int color, Runnable action) {
+        Button row = button(title, () -> {
+            dialog.dismiss();
+            action.run();
+        });
+        row.setBackground(flatRowBackground());
+        row.setTextColor(color);
+        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), 0, dp(14), 0);
+        row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
+        row.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(color));
+        row.setCompoundDrawablePadding(dp(14));
+        panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+        return row;
     }
 
     private void chooseExportLocation(File file) {
