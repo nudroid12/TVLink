@@ -701,7 +701,8 @@ public class MainActivity extends Activity {
     private void pairSystemRemote(Runnable paired, boolean linkFiles) {
         if (remotePairing || busy) return;
         new AlertDialog.Builder(this).setTitle("Pair TV")
-                .setMessage("Open Pair in TVLink on your TV. Keep both devices on the same Wi-Fi.")
+                .setMessage(linkFiles ? "Open Pair in TVLink on your TV. Keep both devices on the same Wi-Fi."
+                        : "Keep your Android TV on and connected to the same network.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Find TV", (dialog, choice) -> findPairingTv(paired, linkFiles))
                 .show();
@@ -723,22 +724,26 @@ public class MainActivity extends Activity {
                     showLinkComplete(paired);
                     return;
                 }
-                java.util.Map<String, String> devices = LinkNetwork.findPairingTvs();
+                java.util.Map<String, String> devices = linkFiles ? LinkNetwork.findPairingTvs()
+                        : RemoteDiscovery.find(this);
+                if (!linkFiles && devices.isEmpty()) devices = LinkNetwork.findPairingTvs();
+                java.util.Map<String, String> discovered = devices;
                 runOnUiThread(() -> {
                     searching.dismiss();
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
-                    if (devices.isEmpty()) {
+                    if (discovered.isEmpty()) {
                         new AlertDialog.Builder(this).setTitle("No TV found")
-                                .setMessage("Open Pair on your TV and check that both devices are on the same Wi-Fi.")
+                                .setMessage(linkFiles ? "Open Pair on your TV and check that both devices are on the same Wi-Fi."
+                                        : "Keep Android TV on and on the same network. You can also open Pair in TVLink on the TV.")
                                 .setNegativeButton("Cancel", null)
                                 .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired, linkFiles))
                                 .show();
-                    } else if (devices.size() == 1) {
-                        connectForPairing(devices.keySet().iterator().next(), paired, linkFiles);
+                    } else if (discovered.size() == 1) {
+                        connectForPairing(discovered.keySet().iterator().next(), paired, linkFiles);
                     } else {
-                        String[] hosts = devices.keySet().toArray(new String[0]);
-                        String[] names = devices.values().toArray(new String[0]);
+                        String[] hosts = discovered.keySet().toArray(new String[0]);
+                        String[] names = discovered.values().toArray(new String[0]);
                         new AlertDialog.Builder(this).setTitle("Choose your TV")
                                 .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired, linkFiles))
                                 .setNegativeButton("Cancel", null).show();
@@ -775,7 +780,7 @@ public class MainActivity extends Activity {
                             finishLink(host, connecting);
                         } else {
                             try (AndroidTvRemote remote = new AndroidTvRemote(
-                                    getNoBackupFilesDir(), host, false, previousPin, legacy)) {
+                                    this, getNoBackupFilesDir(), host, false, previousPin, legacy)) {
                                 remote.start();
                             } catch (Exception error) {
                                 throw new RemoteUnavailable(error);
@@ -790,7 +795,7 @@ public class MainActivity extends Activity {
                         // Try the system pairing flow if a saved remote connection no longer works.
                     }
                 }
-                pairing = new AndroidTvRemote(getNoBackupFilesDir(), host, true, "", false);
+                pairing = new AndroidTvRemote(this, getNoBackupFilesDir(), host, true, "", false);
                 pairing.beginPairing();
                 AndroidTvRemote pending = pairing;
                 reportPairingStatus(host, "CODE");
@@ -1057,7 +1062,7 @@ public class MainActivity extends Activity {
     }
 
     private void startRemote(String host, String pin, boolean legacyIdentity) throws Exception {
-        remoteConnection = new AndroidTvRemote(getNoBackupFilesDir(), host, false, pin, legacyIdentity);
+        remoteConnection = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false, pin, legacyIdentity);
         remoteConnection.start();
     }
 

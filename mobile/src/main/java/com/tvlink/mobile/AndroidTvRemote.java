@@ -1,7 +1,6 @@
 package com.tvlink.mobile;
 
 import java.io.*;
-import java.net.InetSocketAddress;
 import java.security.*;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -20,7 +19,7 @@ final class AndroidTvRemote implements AutoCloseable {
     private final X509Certificate identity;
     private volatile boolean closed;
 
-    AndroidTvRemote(File identityDirectory, String host, boolean pairing, String pin,
+    AndroidTvRemote(android.content.Context androidContext, File identityDirectory, String host, boolean pairing, String pin,
                     boolean legacyIdentity) throws Exception {
         KeyStore legacy = KeyStore.getInstance("AndroidKeyStore");
         legacy.load(null);
@@ -53,9 +52,10 @@ final class AndroidTvRemote implements AutoCloseable {
         };
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(new KeyManager[] {client}, new TrustManager[] {trust}, null);
-        socket = (SSLSocket) context.getSocketFactory().createSocket();
+        int port = pairing ? 6467 : 6466;
+        java.net.Socket raw = RemoteDiscovery.connect(androidContext, host, port);
         try {
-            socket.connect(new InetSocketAddress(host, pairing ? 6467 : 6466), 5000);
+            socket = (SSLSocket) context.getSocketFactory().createSocket(raw, host, port, true);
             socket.setSoTimeout(8000);
             try {
                 socket.startHandshake();
@@ -65,7 +65,7 @@ final class AndroidTvRemote implements AutoCloseable {
             input = new DataInputStream(socket.getInputStream());
             output = socket.getOutputStream();
         } catch (Exception error) {
-            socket.close();
+            try { raw.close(); } catch (IOException closeError) { error.addSuppressed(closeError); }
             throw error;
         }
     }
