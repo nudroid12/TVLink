@@ -68,6 +68,8 @@ final class TransferServer implements AutoCloseable {
         discovery.enablePairingDiscovery(enabled);
     }
 
+    String pairingStatus() { return discovery.pairingStatus(); }
+
     boolean linkKey(int digit) {
         return linkKeys.input(digit);
     }

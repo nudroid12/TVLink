@@ -230,7 +230,7 @@ public class MainActivity extends Activity {
         wordmark.setContentDescription("TVLink");
         header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button pair = button(hasFilePairing() && hasRemotePairing() ? "Paired" : "Pair", this::pairMenu);
+        Button pair = button(hasRemotePairing() ? "Paired" : "Pair", this::pairMenu);
         header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
         Button settings = button("", this::showSettings);
         settings.setContentDescription("Settings");
@@ -340,14 +340,16 @@ public class MainActivity extends Activity {
     }
 
     private void pairMenu() {
-        if (!hasFilePairing()) {
-            pairSystemRemote(this::home);
+        if (!hasRemotePairing()) {
+            pairSystemRemote(this::home, false);
             return;
         }
         new AlertDialog.Builder(this).setTitle("Linked TV")
-                .setMessage("This link is used for Remote and file transfers.")
+                .setMessage(hasFilePairing() ? "Remote and file transfers connected."
+                        : "Remote paired · File transfer not connected")
                 .setNegativeButton("Close", null)
-                .setPositiveButton("Change TV", (dialog, choice) -> pairSystemRemote(this::home))
+                .setPositiveButton(hasFilePairing() ? "Change TV" : "Connect file transfer",
+                        (dialog, choice) -> pairSystemRemote(this::home, !hasFilePairing()))
                 .show();
     }
 
@@ -357,8 +359,8 @@ public class MainActivity extends Activity {
     }
 
     private void openRemote() {
-        if (hasFilePairing() && hasRemotePairing()) showRemote();
-        else pairSystemRemote(this::showRemote);
+        if (hasRemotePairing()) showRemote();
+        else pairSystemRemote(this::showRemote, false);
     }
 
     private void showSend() {
@@ -498,46 +500,52 @@ public class MainActivity extends Activity {
     }
 
     private void pairSystemRemote() {
-        pairSystemRemote(() -> {});
+        pairSystemRemote(() -> {}, false);
     }
 
     private void pairSystemRemote(Runnable paired) {
+        pairSystemRemote(paired, true);
+    }
+
+    private void pairSystemRemote(Runnable paired, boolean linkFiles) {
         if (remotePairing || busy) return;
         new AlertDialog.Builder(this).setTitle("Pair TV")
                 .setMessage("Open Pair in TVLink on your TV. Keep both devices on the same Wi-Fi.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Find TV", (dialog, choice) -> findPairingTv(paired))
+                .setPositiveButton("Find TV", (dialog, choice) -> findPairingTv(paired, linkFiles))
                 .show();
     }
 
-    private void findPairingTv(Runnable paired) {
+    private void findPairingTv(Runnable paired, boolean linkFiles) {
         if (remotePairing || isFinishing() || isDestroyed()) return;
         remotePairing = true;
-        notifyUser("Looking for your TV…");
+        AlertDialog searching = pairingProgress("Searching for TV…");
         remoteIo.execute(() -> {
             try {
                 java.util.Map<String, String> devices = LinkNetwork.findPairingTvs();
                 runOnUiThread(() -> {
+                    searching.dismiss();
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
                     if (devices.isEmpty()) {
                         new AlertDialog.Builder(this).setTitle("No TV found")
                                 .setMessage("Open Pair on your TV and check that both devices are on the same Wi-Fi.")
                                 .setNegativeButton("Cancel", null)
-                                .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired))
+                                .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired, linkFiles))
                                 .show();
                     } else if (devices.size() == 1) {
-                        connectForPairing(devices.keySet().iterator().next(), paired);
+                        connectForPairing(devices.keySet().iterator().next(), paired, linkFiles);
                     } else {
                         String[] hosts = devices.keySet().toArray(new String[0]);
                         String[] names = devices.values().toArray(new String[0]);
                         new AlertDialog.Builder(this).setTitle("Choose your TV")
-                                .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired))
+                                .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired, linkFiles))
                                 .setNegativeButton("Cancel", null).show();
                     }
                 });
             } catch (IOException error) {
                 runOnUiThread(() -> {
+                    searching.dismiss();
                     remotePairing = false;
                     notifyUser("Could not search your Wi-Fi for a TV.");
                 });
@@ -545,20 +553,35 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void connectForPairing(String host, Runnable paired) {
+    private void connectForPairing(String host, Runnable paired, boolean linkFiles) {
         if (remotePairing || isFinishing() || isDestroyed()) return;
         remotePairing = true;
+        AlertDialog connecting = pairingProgress("Connecting to TV…");
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         remoteIo.execute(() -> {
             AndroidTvRemote pairing = null;
             try {
+                reportPairingStatus(host, "CONNECTING");
                 String previousHost = prefs.getString("pending_host", prefs.getString("remote_host", ""));
                 String previousPin = prefs.getString("pending_pin", prefs.getString("remote_pin", ""));
                 if (!previousPin.isEmpty() && previousHost.equals(host)) {
                     try {
                         boolean pending = !prefs.getString("pending_pin", "").isEmpty();
                         boolean legacy = prefs.getBoolean(pending ? "pending_legacy_identity" : "remote_legacy_identity", true);
-                        finishLink(host, previousPin, legacy);
+                        if (linkFiles) {
+                            runOnUiThread(() -> connecting.setMessage("Connecting file transfer…"));
+                            finishLink(host, previousPin, legacy);
+                        } else {
+                            try (AndroidTvRemote remote = new AndroidTvRemote(
+                                    getNoBackupFilesDir(), host, false, previousPin, legacy)) {
+                                remote.start();
+                            } catch (Exception error) {
+                                throw new RemoteUnavailable(error);
+                            }
+                            saveRemotePairing(host, previousPin, legacy);
+                        }
+                        reportPairingStatus(host, "PAIRED");
+                        runOnUiThread(connecting::dismiss);
                         showLinkComplete(paired);
                         return;
                     } catch (RemoteUnavailable error) {
@@ -568,23 +591,30 @@ public class MainActivity extends Activity {
                 pairing = new AndroidTvRemote(getNoBackupFilesDir(), host, true, "", false);
                 pairing.beginPairing();
                 AndroidTvRemote pending = pairing;
-                runOnUiThread(() -> enterRemoteCode(pending, host, paired));
+                reportPairingStatus(host, "CODE");
+                runOnUiThread(() -> {
+                    connecting.dismiss();
+                    enterRemoteCode(pending, host, paired, linkFiles);
+                });
             } catch (Exception error) {
                 if (pairing != null) pairing.close();
+                reportPairingStatus(host, "FAILED");
                 android.util.Log.w("TVLink", "TV pairing failed before entering code", error);
                 runOnUiThread(() -> {
+                    connecting.dismiss();
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
                     String detail = error.getMessage();
                     new AlertDialog.Builder(this).setTitle("Could not start Android TV pairing")
                             .setMessage(detail == null ? error.getClass().getSimpleName() : detail)
-                            .setPositiveButton("OK", null).show();
+                            .setNegativeButton("Close", null)
+                            .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
                 });
             }
         });
     }
 
-    private void enterRemoteCode(AndroidTvRemote pairing, String host, Runnable paired) {
+    private void enterRemoteCode(AndroidTvRemote pairing, String host, Runnable paired, boolean linkFiles) {
         if (isFinishing() || isDestroyed()) {
             pairing.close();
             return;
@@ -601,11 +631,28 @@ public class MainActivity extends Activity {
                 .setMessage("Enter all 6 characters shown by Android TV, including any letters A–F.")
                 .setView(code).setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", null).create();
-        dialog.setOnDismissListener(ignored -> {
+        android.os.Handler timer = new android.os.Handler(android.os.Looper.getMainLooper());
+        Runnable expire = () -> {
+            if (!dialog.isShowing()) return;
+            dialog.setOnDismissListener(null);
+            dialog.dismiss();
             pairing.close();
             remotePairing = false;
+            if (!isDestroyed()) {
+                remoteIo.execute(() -> reportPairingStatus(host, "TIMED_OUT"));
+                new AlertDialog.Builder(this).setTitle("Pairing code timed out")
+                        .setNegativeButton("Close", null)
+                        .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
+            }
+        };
+        dialog.setOnDismissListener(ignored -> {
+            timer.removeCallbacks(expire);
+            pairing.close();
+            remotePairing = false;
+            if (!isDestroyed()) remoteIo.execute(() -> reportPairingStatus(host, "CANCELLED"));
         });
         dialog.show();
+        timer.postDelayed(expire, 90000);
         code.requestFocus();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String value = code.getText().toString().trim();
@@ -615,23 +662,36 @@ public class MainActivity extends Activity {
                 code.requestFocus();
                 return;
             }
+            timer.removeCallbacks(expire);
             dialog.setOnDismissListener(null);
             dialog.dismiss();
             AlertDialog progress = new AlertDialog.Builder(this).setTitle("Linking TV")
                     .setMessage("Checking the code on Android TV…").setCancelable(false).show();
             remoteIo.execute(() -> {
+                boolean remoteSaved = false;
                 try (AndroidTvRemote connection = pairing) {
+                    reportPairingStatus(host, "VERIFYING");
                     String pin = connection.finishPairing(value);
-                    runOnUiThread(() -> progress.setMessage("Saving the link for Remote and file transfers…"));
-                    finishLink(host, pin, false);
+                    saveRemotePairing(host, pin, false);
+                    remoteSaved = true;
+                    reportPairingStatus(host, "PAIRED");
+                    if (linkFiles) {
+                        runOnUiThread(() -> progress.setMessage("Remote paired. Connecting file transfer…"));
+                        finishLink(host, pin, false);
+                    }
+                    runOnUiThread(progress::dismiss);
                     showLinkComplete(paired);
                 } catch (Exception error) {
+                    boolean pairedSuccessfully = remoteSaved;
+                    if (!pairedSuccessfully) reportPairingStatus(host, "FAILED");
                     runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed()) return;
-                        new AlertDialog.Builder(this).setTitle("Could not finish linking")
+                        progress.dismiss();
+                        new AlertDialog.Builder(this).setTitle(pairedSuccessfully
+                                ? "Remote paired · File transfer not connected" : "Could not finish pairing")
                                 .setMessage(error.getMessage())
                                 .setNegativeButton("Close", null)
-                                .setPositiveButton("Try again", (d, w) -> findPairingTv(paired)).show();
+                                .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
                     });
                 } finally {
                     runOnUiThread(() -> {
@@ -641,6 +701,26 @@ public class MainActivity extends Activity {
                 }
             });
         });
+    }
+
+    private AlertDialog pairingProgress(String status) {
+        return new AlertDialog.Builder(this).setTitle("Pair TV")
+                .setMessage(status).setCancelable(false).show();
+    }
+
+    private void reportPairingStatus(String host, String status) {
+        // Status is advisory and must never block system pairing.
+        LinkNetwork.sendPairingStatus(host, status);
+    }
+
+    private void saveRemotePairing(String host, String pin, boolean legacyIdentity) throws IOException {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        android.content.SharedPreferences.Editor edit = prefs.edit()
+                .putString("remote_host", host).putString("remote_pin", pin)
+                .putBoolean("remote_legacy_identity", legacyIdentity);
+        if (!host.equals(prefs.getString("remote_host", ""))) edit.remove("link_token");
+        if (!edit.commit()) throw new IOException("Could not save Remote pairing on this phone");
+        closeSystemRemote();
     }
 
     private static final class RemoteUnavailable extends IOException {
@@ -708,7 +788,8 @@ public class MainActivity extends Activity {
             remotePairing = false;
             if (isDestroyed() || isFinishing()) return;
             if (started) startReceiver();
-            notifyUser("TV linked");
+            notifyUser(hasFilePairing() ? "Remote and file transfers connected"
+                    : "Remote paired · File transfer not connected");
             paired.run();
         });
     }
@@ -745,6 +826,7 @@ public class MainActivity extends Activity {
                         startRemote(host, pin, legacyIdentity);
                     } catch (Exception previousAddressUnavailable) {
                         closeSystemRemote();
+                        if (token.isEmpty()) throw previousAddressUnavailable;
                         String resolved = LinkNetwork.resolve(host, token);
                         if (resolved.equals(host)) throw previousAddressUnavailable;
                         startRemote(resolved, pin, legacyIdentity);

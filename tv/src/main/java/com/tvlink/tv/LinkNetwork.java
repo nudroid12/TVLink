@@ -15,6 +15,8 @@ final class LinkNetwork implements AutoCloseable {
     private static final String PREFIX = "TVLink1";
     private final DatagramSocket listener;
     private volatile boolean pairing;
+    private volatile String pairingStatus = "Ready to pair";
+    private String pairingPeer;
 
     LinkNetwork(SharedPreferences settings) {
         DatagramSocket socket = null;
@@ -41,8 +43,35 @@ final class LinkNetwork implements AutoCloseable {
         }
     }
 
-    void enablePairingDiscovery(boolean enabled) {
+    synchronized void enablePairingDiscovery(boolean enabled) {
         pairing = enabled;
+        pairingPeer = null;
+        pairingStatus = "Ready to pair";
+    }
+
+    String pairingStatus() {
+        return pairingStatus;
+    }
+
+    private synchronized boolean updatePairingStatus(DatagramPacket request, String message) {
+        String prefix = "TVLinkPairStatus1 ";
+        if (!message.startsWith(prefix)) return false;
+        if (!pairing) return true;
+        String peer = request.getAddress().getHostAddress();
+        String stage = message.substring(prefix.length());
+        if ("CONNECTING".equals(stage) || "CODE".equals(stage)) pairingPeer = peer;
+        if (!peer.equals(pairingPeer)) return true;
+        switch (stage) {
+            case "CONNECTING": pairingStatus = "Phone connecting…"; break;
+            case "CODE": pairingStatus = "Enter the code shown by Android TV on your phone."; break;
+            case "VERIFYING": pairingStatus = "Pairing in progress…"; break;
+            case "PAIRED": pairingStatus = "Phone reports Remote paired · File transfer not connected"; break;
+            case "FAILED": pairingStatus = "Pairing failed. Tap Find TV on your phone to try again."; break;
+            case "TIMED_OUT": pairingStatus = "Pairing code timed out. Try again from your phone."; break;
+            case "CANCELLED": pairingStatus = "Pairing cancelled. Ready to pair again."; break;
+            default: break;
+        }
+        return true;
     }
 
     private void respond(SharedPreferences settings) {
@@ -51,6 +80,7 @@ final class LinkNetwork implements AutoCloseable {
                 DatagramPacket request = new DatagramPacket(new byte[128], 128);
                 listener.receive(request);
                 String message = decode(request);
+                if (updatePairingStatus(request, message)) continue;
                 String prefix = "TVLinkPair1 ";
                 if (pairing && message.startsWith(prefix)) {
                     String nonce = message.substring(prefix.length());

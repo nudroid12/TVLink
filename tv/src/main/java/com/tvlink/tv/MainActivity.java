@@ -72,7 +72,8 @@ public class MainActivity extends Activity {
             if (pairing == null) return;
             if (isLinked()) {
                 showReceive();
-            } else {
+            } else if (receiver != null) {
+                pairing.setText(receiver.pairingStatus());
                 refresh.postDelayed(this, 400);
             }
         }
@@ -348,7 +349,7 @@ public class MainActivity extends Activity {
         if (!startReceiver()) return;
         info(body, "On your phone, tap Pair → Find TV. Keep this TV screen open.");
         pairing = new TextView(this);
-        pairing.setText("Enter the code on your phone when Android TV shows it.");
+        pairing.setText("Ready to pair");
         body.addView(pairing);
         receiver.enableLinking(true);
         refresh.postDelayed(updatePairing, 400);
@@ -356,8 +357,11 @@ public class MainActivity extends Activity {
     }
 
     private final Runnable expireLink = () -> {
-        if (receiver != null) receiver.enableLinking(false);
-        if (pairing != null) pairing.setText("Pairing timed out. Reopen Pair to try again.");
+        refresh.removeCallbacks(updatePairing);
+        if (receiver == null || pairing == null) return;
+        boolean remotePaired = receiver.pairingStatus().startsWith("Phone reports Remote paired");
+        receiver.enableLinking(false);
+        if (!remotePaired) pairing.setText("Pairing timed out. Press Back and reopen Pair to try again.");
     };
 
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {

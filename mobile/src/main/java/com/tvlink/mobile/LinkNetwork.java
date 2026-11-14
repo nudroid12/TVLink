@@ -86,6 +86,15 @@ final class LinkNetwork implements AutoCloseable {
         return devices;
     }
 
+    static void sendPairingStatus(String host, String status) {
+        try (DatagramSocket socket = new DatagramSocket()) {
+            byte[] data = ("TVLinkPairStatus1 " + status).getBytes(StandardCharsets.UTF_8);
+            socket.send(new DatagramPacket(data, data.length, InetAddress.getByName(host), PORT));
+        } catch (IOException ignored) {
+            // Pairing is independent of status delivery.
+        }
+    }
+
     static String resolve(String host, String token) throws IOException {
         try (TransferClient client = new TransferClient(host, "PING", token)) {
             client.confirm();
