@@ -137,22 +137,31 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     void start() throws IOException {
+        start(message -> {});
+    }
+
+    void start(java.util.function.Consumer<String> log) throws IOException {
         int features = 3;
         int frames = 0;
         while (!closed && frames++ < 64) {
             Map<Integer, Object> message = read();
             if (message.containsKey(1)) {
+                log.accept("TV sent Remote configuration.");
                 Map<Integer, Object> config = parse((byte[]) message.get(1));
                 features &= (Integer) config.getOrDefault(1, 0);
                 if ((features & 2) == 0) throw new IOException("TV does not offer remote keys");
                 byte[] info = concat(number(3, 1), string(4, "1"), string(5, "atvremote"), string(6, "1.0.0"));
                 write(field(1, concat(number(1, features), field(2, info))));
             }
-            if (message.containsKey(2)) write(field(2, number(1, features)));
+            if (message.containsKey(2)) {
+                write(field(2, number(1, features)));
+                log.accept("Remote activated. Waiting for TV ready message…");
+            }
             if (message.containsKey(3)) throw new IOException("TV rejected remote connection");
             pong(message);
             if (message.containsKey(40)) {
                 startKeepalive();
+                log.accept("TV confirmed the Remote session.");
                 return;
             }
         }

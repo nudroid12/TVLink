@@ -65,7 +65,7 @@ final class LinkNetwork implements AutoCloseable {
             case "CONNECTING": pairingStatus = "Phone connecting…"; break;
             case "CODE": pairingStatus = "Enter the code shown by Android TV on your phone."; break;
             case "VERIFYING": pairingStatus = "Pairing in progress…"; break;
-            case "PAIRED": pairingStatus = "Phone reports Remote paired · File transfer not connected"; break;
+            case "PAIRED": pairingStatus = "Phone reports Remote pairing saved. Press Back to exit, or connect file transfer from your phone."; break;
             case "FAILED": pairingStatus = "Pairing failed. Tap Find TV on your phone to try again."; break;
             case "TIMED_OUT": pairingStatus = "Pairing code timed out. Try again from your phone."; break;
             case "CANCELLED": pairingStatus = "Pairing cancelled. Ready to pair again."; break;

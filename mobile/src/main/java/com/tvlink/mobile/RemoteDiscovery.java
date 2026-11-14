@@ -96,8 +96,11 @@ final class RemoteDiscovery {
                 try { socket.close(); } catch (IOException ignored) {}
             }
         }
-        throw new IOException("Could not reach the TV Remote Service at " + address + ":" + port
-                + ". " + (failure == null ? "" : failure.getMessage()), failure);
+        java.net.SocketException unavailable = new java.net.SocketException(
+                "Could not reach the TV Remote Service at " + address + ":" + port
+                        + ". " + (failure == null ? "" : failure.getMessage()));
+        unavailable.initCause(failure);
+        throw unavailable;
     }
 
     private RemoteDiscovery() {}

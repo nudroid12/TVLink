@@ -683,7 +683,10 @@ public class MainActivity extends Activity {
 
     private void showRemote() {
         LinearLayout body = feature("Remote");
-        info(body, "Connect to Android TV Remote Service over Wi-Fi.");
+        TextView status = info(body, "Connecting to Android TV Remote Service…");
+        remoteStatus = status;
+        body.addView(button("Reconnect", () -> connectRemoteScreen(status)));
+        connectRemoteScreen(status);
         remoteRow(body, new String[] {"↑"}, new int[] {19});
         remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {21, 23, 22});
         remoteRow(body, new String[] {"↓"}, new int[] {20});
@@ -1096,44 +1099,85 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sendSystemKey(int key) {
-        if (remotePairing) return;
-        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        String host = prefs.getString("remote_host", "");
-        String pin = prefs.getString("remote_pin", "");
-        String token = prefs.getString("link_token", "");
-        boolean legacyIdentity = prefs.getBoolean("remote_legacy_identity", true);
-        if (host.isEmpty() || pin.isEmpty()) {
-            pairSystemRemote();
-            return;
-        }
+    private TextView remoteStatus;
+    private boolean remoteConnecting;
+
+    private void connectRemoteScreen(TextView status) {
+        if (remoteConnecting || remotePairing) return;
+        remoteConnecting = true;
+        PairingLog progress = pairingProgress("Opening Remote session…");
         remoteIo.execute(() -> {
+            Exception failure = null;
             try {
-                if (remoteConnection == null || !remoteConnection.isOpen()) {
-                    closeSystemRemote();
-                    try {
-                        startRemote(host, pin, legacyIdentity);
-                    } catch (Exception previousAddressUnavailable) {
-                        closeSystemRemote();
-                        if (token.isEmpty()) throw previousAddressUnavailable;
-                        String resolved = LinkNetwork.resolve(host, token);
-                        if (resolved.equals(host)) throw previousAddressUnavailable;
-                        startRemote(resolved, pin, legacyIdentity);
-                        prefs.edit().putString("remote_host", resolved).apply();
-                    }
-                }
-                remoteConnection.key(key);
+                ensureRemote(progress::step);
             } catch (Exception error) {
                 closeSystemRemote();
-                remoteIo.getQueue().clear();
-                runOnUiThread(() -> notifyUser("TV remote unavailable: " + error.getMessage()));
+                failure = error;
+            }
+            Exception result = failure;
+            runOnUiThread(() -> {
+                remoteConnecting = false;
+                progress.dismiss();
+                if (isFinishing() || isDestroyed()) return;
+                if (result == null) {
+                    status.setText("Remote connected");
+                } else {
+                    status.setText("Remote disconnected. Tap Reconnect.");
+                    progress.failed("Remote disconnected", result, () -> connectRemoteScreen(status));
+                }
+            });
+        });
+    }
+
+    private void sendSystemKey(int key) {
+        if (remotePairing || remoteConnecting) return;
+        TextView status = remoteStatus;
+        remoteIo.execute(() -> {
+            try {
+                ensureRemote(message -> runOnUiThread(() -> status.setText(message)));
+                remoteConnection.key(key);
+                runOnUiThread(() -> status.setText("Remote connected · Key sent"));
+            } catch (Exception error) {
+                closeSystemRemote();
+                String detail = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+                runOnUiThread(() -> status.setText("Remote disconnected: " + detail));
             }
         });
     }
 
-    private void startRemote(String host, String pin, boolean legacyIdentity) throws Exception {
-        remoteConnection = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false, pin, legacyIdentity);
-        remoteConnection.start();
+    private void ensureRemote(java.util.function.Consumer<String> log) throws Exception {
+        if (remoteConnection != null && remoteConnection.isOpen()) return;
+        closeSystemRemote();
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("remote_host", "");
+        String pin = prefs.getString("remote_pin", "");
+        if (host.isEmpty() || pin.isEmpty()) throw new IOException("Pair Remote first");
+        boolean legacy = prefs.getBoolean("remote_legacy_identity", true);
+        try {
+            startRemote(host, pin, legacy, log);
+        } catch (java.net.SocketException original) {
+            closeSystemRemote();
+            log.accept("Saved address failed. Looking for the paired TV…");
+            for (String address : RemoteDiscovery.find(this).keySet()) {
+                if (host.equals(address)) continue;
+                try {
+                    startRemote(address, pin, legacy, log);
+                    prefs.edit().putString("remote_host", address).apply();
+                    return;
+                } catch (Exception error) {
+                    closeSystemRemote();
+                    original.addSuppressed(error);
+                }
+            }
+            throw original;
+        }
+    }
+
+    private void startRemote(String host, String pin, boolean legacyIdentity,
+                             java.util.function.Consumer<String> log) throws Exception {
+        remoteConnection = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false, pin, legacyIdentity, log);
+        log.accept("TLS connected. Negotiating Remote session…");
+        remoteConnection.start(log);
     }
 
     private void closeSystemRemote() {
