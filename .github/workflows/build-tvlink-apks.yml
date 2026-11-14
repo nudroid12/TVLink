@@ -74,14 +74,28 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build and verify debug APKs
+      - name: Build, sign and verify APKs
         if: steps.scope.outputs.mobile == 'true' || steps.scope.outputs.tv == 'true'
         shell: bash
         env:
           MOBILE: ${{ steps.scope.outputs.mobile }}
           TV: ${{ steps.scope.outputs.tv }}
+          TVLINK_KEYSTORE_BASE64: ${{ secrets.TVLINK_KEYSTORE_BASE64 }}
+          TVLINK_KEYSTORE_PASSWORD: ${{ secrets.TVLINK_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
+          if [[ -z "$TVLINK_KEYSTORE_BASE64" || -z "$TVLINK_KEYSTORE_PASSWORD" ]]; then
+            echo "::error::Set TVLINK_KEYSTORE_BASE64 and TVLINK_KEYSTORE_PASSWORD in GitHub Actions secrets."
+            exit 1
+          fi
+          umask 077
+          signing_dir="$(mktemp -d "${RUNNER_TEMP:?}/tvlink-signing.XXXXXX")"
+          trap 'rm -rf -- "$signing_dir"' EXIT
+          keystore="$signing_dir/tvlink.p12"
+          printf '%s' "$TVLINK_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          unset TVLINK_KEYSTORE_BASE64
+          keytool -list -storetype PKCS12 -keystore "$keystore" -alias tvlink \
+            -storepass:env TVLINK_KEYSTORE_PASSWORD >/dev/null
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
           missing=()
           if [[ ! -s "$sdk/platforms/android-35/android.jar" ]]; then
@@ -109,15 +123,19 @@ jobs:
           tasks=()
           if [[ "$MOBILE" == true ]]; then tasks+=(:mobile:assembleDebug); fi
           if [[ "$TV" == true ]]; then tasks+=(:tv:assembleDebug); fi
-          gradle "${tasks[@]}" --stacktrace
+          env -u TVLINK_KEYSTORE_PASSWORD gradle "${tasks[@]}" --stacktrace
           mkdir -p dist
           for module in mobile tv; do
             if [[ "$module" == mobile && "$MOBILE" != true ]] || [[ "$module" == tv && "$TV" != true ]]; then
               continue
             fi
             apk="$module/build/outputs/apk/debug/$module-debug.apk"
-            "$sdk/build-tools/34.0.0/apksigner" verify "$apk"
-            cp "$apk" "dist/TVLink-${module^^}-debug.apk"
+            signed_apk="dist/TVLink-${module^^}-debug.apk"
+            apksigner="$sdk/build-tools/34.0.0/apksigner"
+            "$apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias tvlink \
+              --ks-pass env:TVLINK_KEYSTORE_PASSWORD --key-pass env:TVLINK_KEYSTORE_PASSWORD \
+              --out "$signed_apk" "$apk"
+            "$apksigner" verify --print-certs "$signed_apk"
           done
 
       - uses: actions/upload-artifact@v4
