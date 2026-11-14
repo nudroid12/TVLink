@@ -4,20 +4,15 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Locale;
-import java.util.UUID;
 
 final class TransferServer implements AutoCloseable {
     static final int PORT = 47832;
     private static final long LIMIT = 4L * 1024 * 1024 * 1024;
     private final File folder;
     private final ServerSocket server;
+    private final LinkNetwork discovery;
     private Socket active;
     private volatile boolean closed;
-    private volatile String code;
-    private long codeExpiry;
-    private long nextAttempt;
     private final android.content.SharedPreferences settings;
 
     TransferServer(File folder, android.content.SharedPreferences settings) throws IOException {
@@ -32,24 +27,8 @@ final class TransferServer implements AutoCloseable {
             server.close();
             throw error;
         }
-        if (settings.getString("transfer_token", "").isEmpty()) renewCode();
-        else code = "";
+        discovery = new LinkNetwork(settings);
         new Thread(this::serve, "TVLink receiver").start();
-    }
-
-    synchronized String renewCode() {
-        code = String.format(Locale.ROOT, "%08d", new SecureRandom().nextInt(100000000));
-        codeExpiry = android.os.SystemClock.elapsedRealtime() + 300000;
-        return code;
-    }
-
-    synchronized String currentCode() {
-        return code;
-    }
-
-    synchronized void forgetPhone() {
-        settings.edit().remove("transfer_token").apply();
-        renewCode();
     }
 
     static File file(File folder, String name) throws IOException {
@@ -82,57 +61,22 @@ final class TransferServer implements AutoCloseable {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
-    private synchronized void pair(String supplied, DataOutputStream out) throws IOException {
-        long now = android.os.SystemClock.elapsedRealtime();
-        if (now < nextAttempt || now >= codeExpiry || code.isEmpty() || !equal(code, supplied)) {
-            nextAttempt = now + 1500;
-            throw new IOException("Invalid or expired pairing code. Try again in a moment.");
-        }
-        String token = UUID.randomUUID().toString() + UUID.randomUUID();
-        if (!settings.edit().putString("transfer_token", token).commit()) {
-            throw new IOException("Could not save pairing");
-        }
-        code = "";
-        out.writeUTF("OK");
-        out.writeUTF(token);
-    }
-
     private void handle(Socket socket) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         try {
             String operation = in.readUTF();
-            if ("PAIR".equals(operation)) {
-                pair(in.readUTF(), out);
-            } else {
-                String token = settings.getString("transfer_token", "");
-                if (token.isEmpty() || !equal(token, in.readUTF())) throw new IOException("Pair with TV again");
-                switch (operation) {
-                    case "LIST":
-                        File[] files = folder.listFiles(f -> f.isFile() && !f.getName().startsWith("."));
-                        if (files == null) throw new IOException("Cannot list files");
-                        out.writeUTF("OK");
-                        out.writeInt(files.length);
-                        for (File f : files) out.writeUTF(f.getName());
-                        break;
-                    case "SEND":
-                        if (!settings.getBoolean("receive", true)) throw new IOException("Receive Transfers is disabled");
-                        receive(in, out);
-                        break;
-                    case "DELETE":
-                        if (!file(folder, in.readUTF()).delete()) throw new IOException("Cannot delete file");
-                        out.writeUTF("OK");
-                        break;
-                    case "RENAME":
-                        File source = file(folder, in.readUTF());
-                        File target = file(folder, in.readUTF());
-                        synchronized (folder.getAbsolutePath().intern()) {
-                            if (target.exists() || !source.renameTo(target)) throw new IOException("Cannot rename file");
-                        }
-                        out.writeUTF("OK");
-                        break;
-                    default: throw new IOException("Unknown request");
-                }
+            String token = settings.getString("link_token", "");
+            authorize(operation, token, in, out);
+            switch (operation) {
+                case "PING":
+                    out.writeUTF("OK");
+                    break;
+                case "SEND":
+                    if (!settings.getBoolean("receive", true)) throw new IOException("Receive Transfers is disabled");
+                    receive(in, out);
+                    break;
+                default: throw new IOException("Unknown request");
             }
         } catch (IOException error) {
             out.writeUTF("ERROR");
@@ -141,11 +85,25 @@ final class TransferServer implements AutoCloseable {
         out.flush();
     }
 
+    private void authorize(String operation, String token, DataInputStream in, DataOutputStream out)
+            throws IOException {
+        if (token.isEmpty()) throw new IOException("Link TVLink first");
+        String clientNonce = in.readUTF();
+        String nonce = java.util.UUID.randomUUID().toString();
+        out.writeUTF("AUTH");
+        out.writeUTF(LinkNetwork.sign(token, "server", clientNonce));
+        out.writeUTF(nonce);
+        out.flush();
+        if (!equal(LinkNetwork.sign(token, operation, nonce), in.readUTF())) {
+            throw new IOException("Device link did not match");
+        }
+    }
+
     private void receive(DataInputStream in, DataOutputStream out) throws IOException {
         File target = file(folder, in.readUTF());
         long remaining = in.readLong();
         if (remaining < 0 || remaining > LIMIT || remaining > folder.getUsableSpace()) {
-            throw new IOException("File size unavailable, too large or insufficient TV storage");
+            throw new IOException("File size unavailable, too large or insufficient storage");
         }
         boolean overwrite = settings.getBoolean("overwrite", false);
         if (target.exists() && (!overwrite || !target.isFile())) {
@@ -179,6 +137,7 @@ final class TransferServer implements AutoCloseable {
 
     @Override public synchronized void close() {
         closed = true;
+        discovery.close();
         try { server.close(); } catch (IOException ignored) {}
         try { if (active != null) active.close(); } catch (IOException ignored) {}
     }

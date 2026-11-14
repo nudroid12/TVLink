@@ -18,7 +18,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
-    private boolean receivingScreen;
     private boolean showingHome;
 
     @Override public void onCreate(Bundle state) {
@@ -70,14 +69,19 @@ public class MainActivity extends Activity {
     private final android.os.Handler refresh = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable updatePairing = new Runnable() {
         @Override public void run() {
-            if (pairing == null || receiver == null) return;
-            String code = receiver.currentCode();
-            pairing.setText(code.isEmpty()
-                    ? "Phone paired. Ready to receive."
-                    : "Pairing code: " + code);
-            refresh.postDelayed(this, 500);
+            if (pairing == null) return;
+            if (isLinked()) {
+                showReceive();
+            } else {
+                refresh.postDelayed(this, 400);
+            }
         }
     };
+    private final java.util.concurrent.ExecutorService sender = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private boolean isLinked() {
+        return !getPreferences(MODE_PRIVATE).getString("link_token", "").isEmpty();
+    }
 
     private File received() {
         return TvSettings.directory(this);
@@ -85,7 +89,6 @@ public class MainActivity extends Activity {
 
     private LinearLayout feature(String title) {
         showingHome = false;
-        receivingScreen = false;
         stopPairingDisplay();
         LinearLayout page = screen();
         LinearLayout header = new LinearLayout(this);
@@ -115,6 +118,12 @@ public class MainActivity extends Activity {
         heading.setPadding(0, dp(8), 0, dp(4));
         body.addView(heading);
 
+        if ("Pair".equals(title)) {
+            page.setFocusableInTouchMode(true);
+            page.requestFocus();
+            return body;
+        }
+
         divider(page);
         LinearLayout tabs = new LinearLayout(this);
         page.addView(tabs);
@@ -131,7 +140,6 @@ public class MainActivity extends Activity {
 
     private void home() {
         showingHome = true;
-        receivingScreen = false;
         stopPairingDisplay();
         LinearLayout page = screen();
         page.setPadding(0, 0, 0, 0);
@@ -149,8 +157,7 @@ public class MainActivity extends Activity {
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         header.addView(logo, new LinearLayout.LayoutParams(dp(116), dp(40)));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        boolean paired = !getPreferences(MODE_PRIVATE).getString("transfer_token", "").isEmpty();
-        Button pair = button(paired ? "Paired" : "Pair", this::showReceive);
+        Button pair = button(isLinked() ? "Paired" : "Pair", this::showLinkStatus);
         pair.setSingleLine(true);
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(pair, new LinearLayout.LayoutParams(-2, dp(44)));
@@ -186,7 +193,8 @@ public class MainActivity extends Activity {
 
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
-        info(body, "On your phone, open TVLink → Remote. Pair with Android TV using the code shown on this TV.");
+        info(body, "Use Remote in TVLink on your phone to control this TV.");
+        if (!isLinked()) body.addView(button("Pair", this::showLinkStatus));
     }
 
     private String appVersion() {
@@ -199,7 +207,6 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         showingHome = false;
-        receivingScreen = false;
         stopPairingDisplay();
         LinearLayout page = screen();
         TextView title = new TextView(this);
@@ -242,7 +249,6 @@ public class MainActivity extends Activity {
         box.setOnFocusChangeListener((view, focused) -> box.setBackground(tile(focused ? 0xff263a5a : 0xff1b2740, focused)));
         box.setOnCheckedChangeListener((view, checked) -> {
             prefs.edit().putBoolean(key, checked).apply();
-            if ("receive".equals(key) && !checked) closeReceiver();
         });
         rows.addView(box, new LinearLayout.LayoutParams(-1, dp(62)));
         divider(rows);
@@ -273,6 +279,7 @@ public class MainActivity extends Activity {
                     }
                     closeReceiver();
                     getPreferences(MODE_PRIVATE).edit().putBoolean("downloads", index == 1).apply();
+                    if (isLinked()) startReceiver();
                     showSettings();
                 }).setNegativeButton("Cancel", null).show();
     }
@@ -311,31 +318,154 @@ public class MainActivity extends Activity {
         stopPairingDisplay();
     }
 
+    private boolean startReceiver() {
+        if (receiver != null) return true;
+        try {
+            receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
+            return true;
+        } catch (IOException error) {
+            notifyUser("Cannot start receiver: " + error.getMessage());
+            return false;
+        }
+    }
+
+    private void showLinkStatus() {
+        LinearLayout body = feature("Pair");
+        if (isLinked()) {
+            info(body, "Phone linked for Remote and file transfers.");
+            body.addView(button("Forget link", () -> new AlertDialog.Builder(this).setTitle("Forget link?")
+                    .setMessage("To revoke system remote access as well, remove TVLink in Android TV's remote settings.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Forget", (dialog, which) -> {
+                        getPreferences(MODE_PRIVATE).edit().remove("link_token").remove("peer_host").apply();
+                        showLinkStatus();
+                    }).show()));
+            return;
+        }
+        if (!startReceiver()) return;
+        info(body, "Open Pair in TVLink on your phone using the same Wi-Fi.");
+        info(body, "TV address: " + localAddresses());
+        pairing = new TextView(this);
+        pairing.setText("Enter the code on your phone when Android TV shows it.");
+        body.addView(pairing);
+        receiver.enableLinking(true);
+        refresh.postDelayed(updatePairing, 400);
+        refresh.postDelayed(expireLink, 180000);
+    }
+
+    private final Runnable expireLink = () -> {
+        if (receiver != null) receiver.enableLinking(false);
+        if (pairing != null) pairing.setText("Pairing timed out. Reopen Pair to try again.");
+    };
+
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        if (pairing != null && receiver != null && hasWindowFocus()) {
+            int digit = linkDigit(event.getKeyCode());
+            if (digit != -2) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    receiver.linkKey(digit);
+                }
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private static int linkDigit(int key) {
+        switch (key) {
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER: return -1;
+            case android.view.KeyEvent.KEYCODE_DPAD_UP: return 0;
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN: return 1;
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: return 2;
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: return 3;
+            default: return -2;
+        }
+    }
+
     private void showReceive() {
         LinearLayout body = feature("Receive Files");
-        receivingScreen = true;
-        if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+        if (!isLinked()) {
+            body.addView(button("Pair", this::showLinkStatus));
+        } else if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
             info(body, "Receive Transfers is disabled in Settings.");
+        } else {
+            info(body, startReceiver() ? "Ready to receive from your linked phone." : "Could not start receiver.");
+        }
+    }
+
+    private void sendFile(File file) {
+        if (!isLinked()) {
+            showLinkStatus();
             return;
         }
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("peer_host", "");
+        String token = prefs.getString("link_token", "");
+        queueSend(() -> {
+            try (FileInputStream stream = new FileInputStream(file)) {
+                sendToPhone(host, token, file.getName(), stream.getChannel().size(), stream);
+            }
+        });
+    }
+
+    private interface SendWork { void run() throws IOException; }
+
+    private void queueSend(SendWork work) {
+        sender.execute(() -> {
+            try {
+                work.run();
+            } catch (IOException | SecurityException error) {
+                runOnUiThread(() -> notifyUser(error.getMessage()));
+            }
+        });
+        notifyUser("Sending file…");
+    }
+
+    private void sendToPhone(String host, String token, String name, long size, InputStream stream)
+            throws IOException {
+        if (stream == null) throw new IOException("Cannot read file");
+        try (TransferClient client = new TransferClient(LinkNetwork.resolve(host, token), "SEND", token)) {
+            client.send(name, size, stream, percent -> {});
+        }
+        runOnUiThread(() -> notifyUser("Sent: " + name));
+    }
+
+    private void chooseFileToSend() {
+        if (!isLinked()) {
+            showLinkStatus();
+            return;
+        }
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*");
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
         try {
-            if (receiver == null) receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
-        } catch (IOException error) {
-            info(body, "Cannot start receiver: " + error.getMessage());
-            return;
+            startActivityForResult(picker, 11);
+        } catch (android.content.ActivityNotFoundException error) {
+            notifyUser("This TV has no file picker. Choose a file from My Files.");
         }
-        info(body, "TV IPv4: " + localAddresses());
-        info(body, "Keep TVLink open while transferring over your trusted network.");
-        pairing = new TextView(this);
-        pairing.setTextSize(24);
-        body.addView(pairing);
-        updatePairing.run();
-        body.addView(button("New pairing code", () -> {
-            receiver.renewCode();
-            refresh.removeCallbacks(updatePairing);
-            updatePairing.run();
-        }));
-        body.addView(button("Forget paired phone", () -> receiver.forgetPhone()));
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != 11 || result != RESULT_OK || data == null || data.getData() == null || !isLinked()) return;
+        android.net.Uri uri = data.getData();
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("peer_host", "");
+        String token = prefs.getString("link_token", "");
+        queueSend(() -> {
+            String name;
+            long size;
+            try (android.database.Cursor cursor = getContentResolver().query(uri,
+                    new String[] {android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE},
+                    null, null, null)) {
+                if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0) || cursor.isNull(1)) {
+                    throw new IOException("File name or size unavailable");
+                }
+                name = cursor.getString(0);
+                size = cursor.getLong(1);
+            }
+            try (InputStream stream = getContentResolver().openInputStream(uri)) {
+                sendToPhone(host, token, name, size, stream);
+            }
+        });
     }
 
     private String localAddresses() {
@@ -358,6 +488,7 @@ public class MainActivity extends Activity {
 
     private void showFiles() {
         LinearLayout body = feature("My Files");
+        body.addView(button("Choose file to send", this::chooseFileToSend));
         body.addView(button("Refresh", this::showFiles));
         File[] files = received().listFiles(f -> f.isFile() && !f.getName().startsWith("."));
         if (files == null || files.length == 0) {
@@ -372,7 +503,7 @@ public class MainActivity extends Activity {
         boolean apk = file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
         new AlertDialog.Builder(this).setTitle(file.getName()).setItems(new String[] {
                 apk ? "Install APK" : "Open",
-                "Rename", "Delete"
+                "Rename", "Delete", "Send to phone"
         }, (d, choice) -> {
             switch (choice) {
                 case 0: openFile(file, apk); break;
@@ -385,6 +516,7 @@ public class MainActivity extends Activity {
                                 showFiles();
                             }).show();
                     break;
+                case 3: sendFile(file); break;
             }
         }).show();
     }
@@ -431,27 +563,27 @@ public class MainActivity extends Activity {
     }
 
     private void stopPairingDisplay() {
+        if (pairing != null && receiver != null) receiver.enableLinking(false);
         pairing = null;
         refresh.removeCallbacks(updatePairing);
+        refresh.removeCallbacks(expireLink);
     }
 
     @Override protected void onStop() {
-        closeReceiver();
+        // Android TV's pairing dialog can briefly cover this activity.
+        if (pairing == null) closeReceiver();
         super.onStop();
     }
 
     @Override protected void onStart() {
         super.onStart();
-        if (receivingScreen && receiver == null) {
-            showReceive();
-        } else if (receiver == null && getPreferences(MODE_PRIVATE).getBoolean("receive", true)
-                && !getPreferences(MODE_PRIVATE).getString("transfer_token", "").isEmpty()) {
-            try {
-                receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
-            } catch (IOException error) {
-                android.util.Log.w("TVLink", "Cannot resume receiver", error);
-            }
-        }
+        if (isLinked()) startReceiver();
+    }
+
+    @Override protected void onDestroy() {
+        closeReceiver();
+        sender.shutdownNow();
+        super.onDestroy();
     }
 
     @Override public void onBackPressed() {

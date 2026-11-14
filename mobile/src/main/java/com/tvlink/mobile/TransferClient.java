@@ -17,7 +17,18 @@ final class TransferClient implements AutoCloseable {
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
             out.writeUTF(operation);
-            out.writeUTF(credential);
+            if ("LINK".equals(operation)) {
+                out.writeUTF(credential);
+            } else {
+                String clientNonce = java.util.UUID.randomUUID().toString();
+                out.writeUTF(clientNonce);
+                out.flush();
+                expect("AUTH");
+                if (!LinkNetwork.matches(LinkNetwork.sign(credential, "server", clientNonce), in.readUTF())) {
+                    throw new IOException("Device link did not match");
+                }
+                out.writeUTF(LinkNetwork.sign(credential, operation, in.readUTF()));
+            }
             out.flush();
         } catch (IOException error) {
             socket.close();
@@ -28,12 +39,11 @@ final class TransferClient implements AutoCloseable {
     private void expect(String expected) throws IOException {
         String result = in.readUTF();
         if ("ERROR".equals(result)) throw new IOException(in.readUTF());
-        if (!expected.equals(result)) throw new IOException("Unexpected response from TV");
+        if (!expected.equals(result)) throw new IOException("Unexpected response from device");
     }
 
-    String pair() throws IOException {
+    void confirm() throws IOException {
         expect("OK");
-        return in.readUTF();
     }
 
     List<String> list() throws IOException {
@@ -52,6 +62,7 @@ final class TransferClient implements AutoCloseable {
     }
 
     void send(String name, long size, InputStream source, java.util.function.IntConsumer progress) throws IOException {
+        if (size < 0) throw new IOException("File size unavailable");
         out.writeUTF(name);
         out.writeLong(size);
         out.flush();

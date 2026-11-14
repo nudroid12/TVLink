@@ -12,6 +12,9 @@
         <provider android:name=".UpdateFileProvider"
             android:authorities="com.tvlink.mobile.files" android:exported="false"
             android:grantUriPermissions="true"/>
+        <provider android:name=".ReceivedFileProvider"
+            android:authorities="com.tvlink.mobile.received" android:exported="false"
+            android:grantUriPermissions="true"/>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
