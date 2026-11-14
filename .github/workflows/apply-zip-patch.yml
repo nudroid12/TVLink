@@ -93,6 +93,12 @@ jobs:
                       path = Path(name)
                       if not any(parent.is_symlink() for parent in path.parents):
                           path.unlink(missing_ok=True)
+              if "mobile/src/main/java/com/tvlink/mobile/MainActivity.java" in seen:
+                  obsolete_bluetooth = Path("mobile/src/main/java/com/tvlink/mobile/BluetoothRemote.java")
+                  if str(obsolete_bluetooth) not in seen and not any(
+                      parent.is_symlink() for parent in (obsolete_bluetooth, *obsolete_bluetooth.parents)
+                  ):
+                      obsolete_bluetooth.unlink(missing_ok=True)
           PYTHON
           git --literal-pathspecs rm -- "$patch"
           git add --all
