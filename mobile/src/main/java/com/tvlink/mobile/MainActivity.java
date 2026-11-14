@@ -284,7 +284,9 @@ public class MainActivity extends Activity {
 
         LinearLayout menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.VERTICAL);
+        menu.setGravity(Gravity.CENTER_VERTICAL);
         ScrollView cards = new ScrollView(this);
+        cards.setFillViewport(true);
         page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
         cards.addView(menu);
         String[] titles = {"Send", "Remote", "Files"};
