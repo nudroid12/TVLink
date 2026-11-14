@@ -16,11 +16,16 @@ final class TransferServer implements AutoCloseable {
     volatile String receiveProgress = "";
     private volatile boolean closed;
     private final android.content.SharedPreferences settings;
+    private final TransferHistory history;
+    private final Runnable onReceived;
 
-    TransferServer(File folder, File identityDirectory, android.content.SharedPreferences settings) throws IOException {
+    TransferServer(File folder, File identityDirectory, android.content.SharedPreferences settings,
+                   TransferHistory history, Runnable onReceived) throws IOException {
         this.folder = folder;
         this.identityDirectory = identityDirectory;
         this.settings = settings;
+        this.history = history;
+        this.onReceived = onReceived;
         if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) throw new IOException("Cannot create file folder");
         server = new ServerSocket();
         try {
@@ -152,10 +157,12 @@ final class TransferServer implements AutoCloseable {
                 }
                 if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
             }
-            TransferHistory.add(settings, "Received: " + target.getName());
+            history.add("Received: " + target.getName());
+            receiveProgress = "";
+            onReceived.run();
             out.writeUTF("OK");
         } catch (IOException error) {
-            TransferHistory.add(settings, "Receive failed: " + target.getName() + " · " + error.getMessage());
+            history.add("Receive failed: " + target.getName() + " · " + error.getMessage());
             throw error;
         } finally {
             receiveProgress = "";

@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
         setTheme(R.style.TVLinkTheme);
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
+        getPreferences(MODE_PRIVATE).edit().remove("transfer_history").apply();
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
     }
@@ -54,6 +55,7 @@ public class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
         page.setBackgroundColor(0xff101624);
+        showingTransfers = false;
         setContentView(page);
         if (title == null) return page;
         TextView heading = new TextView(this);
@@ -274,6 +276,8 @@ public class MainActivity extends Activity {
 
     private final android.os.Handler receiverHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable retryReceiver = this::startReceiver;
+    private final TransferHistory transferHistory = new TransferHistory();
+    private boolean showingTransfers;
     private TextView homeReceiveStatus;
     private String receiverError;
 
@@ -285,7 +289,10 @@ public class MainActivity extends Activity {
             receiverError = null;
         } else if (receiver == null) {
             try {
-                receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
+                receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE),
+                        transferHistory, () -> runOnUiThread(() -> {
+                            if (started && !isFinishing() && !isDestroyed() && !showingTransfers) showTransfers();
+                        }));
                 receiverError = null;
             } catch (IOException | SecurityException error) {
                 receiverError = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
@@ -293,7 +300,13 @@ public class MainActivity extends Activity {
                 receiverHandler.postDelayed(retryReceiver, 3000);
             }
         }
-        if (showingHome && homeReceiveStatus != null) homeReceiveStatus.setText(receiveStatus());
+        if (showingHome) updateHomeReceiverError();
+    }
+
+    private void updateHomeReceiverError() {
+        if (homeReceiveStatus == null) return;
+        homeReceiveStatus.setVisibility(receiverError == null ? android.view.View.GONE : android.view.View.VISIBLE);
+        homeReceiveStatus.setText(receiverError == null ? "" : receiveStatus());
     }
 
     private String receiveStatus() {
@@ -305,6 +318,7 @@ public class MainActivity extends Activity {
 
     private void showTransfers() {
         LinearLayout body = feature("Send / Receive");
+        showingTransfers = true;
         addTransferHeading(body, "Send");
         Button send = hasFilePairing() ? button("Send file", this::chooseFileToSend)
                 : button("Pair TV", () -> pairSystemRemote(this::showTransfers));
@@ -324,7 +338,7 @@ public class MainActivity extends Activity {
         LinearLayout page = screen(null);
         addHeader(page);
         homeReceiveStatus = new TextView(this);
-        homeReceiveStatus.setText(receiveStatus());
+        updateHomeReceiverError();
         homeReceiveStatus.setTextColor(0xffb8c3d6);
         homeReceiveStatus.setTextSize(13);
         homeReceiveStatus.setGravity(Gravity.CENTER);
@@ -743,7 +757,7 @@ public class MainActivity extends Activity {
                 progress.setVisibility(active ? android.view.View.VISIBLE : android.view.View.GONE);
                 if (active) progress.setProgress(Integer.parseInt(match.group(1)));
 
-                org.json.JSONArray entries = TransferHistory.read(prefs);
+                org.json.JSONArray entries = transferHistory.read();
                 String snapshot = entries.toString();
                 if (!snapshot.equals(lastHistory)) {
                     lastHistory = snapshot;
@@ -765,7 +779,7 @@ public class MainActivity extends Activity {
     }
 
     private void finishSend(SendSession session, String outcome) {
-        TransferHistory.add(getPreferences(MODE_PRIVATE), outcome);
+        transferHistory.add(outcome);
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
@@ -1800,6 +1814,7 @@ public class MainActivity extends Activity {
         remoteIo.execute(this::closeSystemRemote);
         remoteIo.shutdown();
         io.shutdownNow();
+        transferHistory.clear();
         super.onDestroy();
     }
 
