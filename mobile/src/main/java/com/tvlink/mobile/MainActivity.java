@@ -124,43 +124,85 @@ public class MainActivity extends Activity {
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(rows);
-        setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
+        setting(rows, "Check for updates", "Version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", LocalSettings.device(this), () -> editSetting("Device Name", "device_name", LocalSettings.device(this)));
-        setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
-        setting(rows, "Direct Downloads access", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Optional for direct Downloads transfers", this::requestStorageAccess);
-        toggle(rows, "Receive Transfers", "Accept incoming transfers from other devices", "receive", true);
-        toggle(rows, "Launch at startup", "Open TVLink at boot where supported by the device", "startup", false);
-        toggle(rows, "Overwrite", "Replace an existing file with the same name", "overwrite", false);
+        setting(rows, "Save received files to", transferFolderLabel(), this::chooseDirectory);
+        setting(rows, "Direct Downloads access", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Optional", this::requestStorageAccess);
+        toggle(rows, "Receive Transfers", "Accept incoming files", "receive", true);
+        toggle(rows, "Launch at startup", "Open TVLink at boot when supported", "startup", false);
+        toggle(rows, "Overwrite", "Replace files with the same name", "overwrite", false);
         toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
         setting(rows, "Receive Files", "View incoming transfers", this::showTransfers);
     }
 
+    private String transferFolderLabel() {
+        return LocalSettings.hasStorageAccess(this) && getPreferences(MODE_PRIVATE).getBoolean("downloads", false)
+                ? "Downloads / TVLink" : "TVLink app folder";
+    }
+
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
-        Button item = button(title + "\n" + detail, action);
-        item.setBackground(flatRowBackground());
-        item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        item.setPadding(dp(12), dp(12), dp(12), dp(12));
-        item.setMinHeight(dp(48));
-        rows.addView(item, new LinearLayout.LayoutParams(-1, -2));
-        divider(rows);
+        addSettingsRow(rows, title, detail, null, action);
     }
 
     private void toggle(LinearLayout rows, String title, String detail, String key, boolean fallback) {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        android.widget.CheckBox box = new android.widget.CheckBox(this);
-        box.setText(title + "\n" + detail);
-        box.setBackground(flatRowBackground());
-        box.setTextColor(Color.WHITE);
-        box.setTextSize(16);
-        box.setMinHeight(dp(48));
-        box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        box.setChecked(prefs.getBoolean(key, fallback));
-        box.setOnCheckedChangeListener((view, checked) -> {
-            prefs.edit().putBoolean(key, checked).apply();
+        android.widget.CompoundButton control = new android.widget.Switch(this);
+        control.setFocusable(false);
+        control.setClickable(false);
+        control.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        control.setChecked(prefs.getBoolean(key, fallback));
+        control.setOnCheckedChangeListener((view, checked) -> prefs.edit().putBoolean(key, checked).apply());
+        addSettingsRow(rows, title, detail, control, control::toggle);
+    }
 
+    private void addSettingsRow(LinearLayout rows, String title, String detail,
+                                android.widget.CompoundButton control, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        row.setMinimumHeight(dp(56));
+        row.setBackground(flatRowBackground());
+        row.setFocusable(true);
+        row.setOnClickListener(view -> action.run());
+        row.setContentDescription(title + ", " + detail);
+        row.setAccessibilityDelegate(new android.view.View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(android.view.View host,
+                    android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(control == null ? Button.class.getName() : control.getClass().getName());
+                if (control != null) {
+                    info.setCheckable(true);
+                    info.setChecked(control.isChecked());
+                }
+            }
         });
-        rows.addView(box, new LinearLayout.LayoutParams(-1, -2));
-        divider(rows);
+        rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextSize(16);
+        heading.setTextColor(Color.WHITE);
+        labels.addView(heading);
+        TextView description = new TextView(this);
+        description.setText(detail);
+        description.setTextSize(13);
+        description.setTextColor(0xffb8c3d6);
+        LinearLayout.LayoutParams descriptionSize = new LinearLayout.LayoutParams(-1, -2);
+        descriptionSize.topMargin = dp(2);
+        labels.addView(description, descriptionSize);
+        if (control != null) {
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-2, -2);
+            size.setMarginStart(dp(12));
+            row.addView(control, size);
+        }
+
+        android.view.View line = new android.view.View(this);
+        line.setBackgroundColor(0xff34425a);
+        rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
     private void editSetting(String title, String key, String initial) {
@@ -180,8 +222,13 @@ public class MainActivity extends Activity {
     }
 
     private void chooseDirectory() {
-        new AlertDialog.Builder(this).setTitle("Transfer Directory")
-                .setItems(new String[] {"TVLink app folder", "Downloads"}, (dialog, index) -> {
+        new AlertDialog.Builder(this).setTitle("Save received files to")
+                .setSingleChoiceItems(new String[] {
+                        "TVLink app folder\n" + new File(getFilesDir(), "received").getAbsolutePath(),
+                        "Downloads / TVLink\n" + new File(android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_DOWNLOADS), "TVLink").getAbsolutePath()
+                }, transferFolderLabel().equals("TVLink app folder") ? 0 : 1, (dialog, index) -> {
+                    dialog.dismiss();
                     if (index == 1 && !LocalSettings.hasStorageAccess(this)) {
                         notifyUser("Allow storage access first, then choose Downloads.");
                         return;
