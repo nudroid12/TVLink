@@ -17,12 +17,17 @@ public final class ReceivedFileProvider extends ContentProvider {
     @Override public boolean onCreate() { return true; }
 
     private File resolve(Uri uri) throws IOException {
+        if (uri.getPathSegments().size() == 2 && "updates".equals(uri.getPathSegments().get(0))
+                && ReleaseCheck.UPDATE_FILE.equals(uri.getLastPathSegment())) {
+            return new File(getContext().getCacheDir(), ReleaseCheck.UPDATE_FILE);
+        }
         if (uri.getPathSegments().size() != 1) throw new IOException("Invalid URI");
         return TransferServer.file(TvSettings.directory(getContext()), uri.getLastPathSegment());
     }
 
     @Override public String getType(Uri uri) {
         String name = uri.getLastPathSegment();
+        if (ReleaseCheck.UPDATE_FILE.equals(name)) return "application/vnd.android.package-archive";
         int dot = name == null ? -1 : name.lastIndexOf('.');
         String mime = dot < 0 ? null : MimeTypeMap.getSingleton().getMimeTypeFromExtension(
                 name.substring(dot + 1).toLowerCase(Locale.ROOT));
