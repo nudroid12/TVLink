@@ -13,7 +13,11 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: tvlink-build-and-publish
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -151,3 +155,41 @@ jobs:
           name: TVLink-TV-debug
           path: dist/TVLink-TV-debug.apk
           if-no-files-found: error
+
+      - name: Publish signed updates
+        if: (github.event_name == 'workflow_run' || github.ref_name == 'main') && (steps.scope.outputs.mobile == 'true' || steps.scope.outputs.tv == 'true')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$(git rev-parse HEAD)" != "$current" ]]; then
+            echo "::error::Main changed during this build. Run the build again on main to publish."
+            exit 1
+          fi
+          if ! gh release view tvlink-dev >/dev/null 2>&1; then
+            gh release create tvlink-dev --target "$(git rev-parse HEAD)" --title 'TVLink Dev' --prerelease
+          fi
+          for module in mobile tv; do
+            apk="dist/TVLink-${module^^}-debug.apk"
+            [[ -f "$apk" ]] || continue
+            feed=update.json
+            if [[ "$module" == tv ]]; then feed=tv-update.json; fi
+            sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
+            aapt="$sdk/build-tools/34.0.0/aapt"
+            badging="$("$aapt" dump badging "$apk")"
+            export VERSION_CODE VERSION_NAME
+            VERSION_CODE="$(sed -n "s/^package: .*versionCode='\([^']*\)'.*/\1/p" <<< "$badging")"
+            VERSION_NAME="$(sed -n "s/^package: .*versionName='\([^']*\)'.*/\1/p" <<< "$badging")"
+            [[ "$VERSION_CODE" =~ ^[0-9]+$ && -n "$VERSION_NAME" ]]
+            asset="TVLink-${module^^}-$VERSION_CODE.apk"
+            existing="$(gh release view tvlink-dev --json assets --jq '.assets[].name')"
+            if ! grep -Fxq -- "$asset" <<< "$existing"; then
+              cp "$apk" "dist/$asset"
+              gh release upload tvlink-dev "dist/$asset"
+            fi
+            export UPDATE_ASSET="$asset"
+            python3 -c 'import json,os; e=os.environ; print(json.dumps(dict(versionCode=int(e["VERSION_CODE"]),versionName=e["VERSION_NAME"],downloadUrl="https://github.com/"+e["GITHUB_REPOSITORY"]+"/releases/download/tvlink-dev/"+e["UPDATE_ASSET"])))' > "dist/$feed"
+            gh release upload tvlink-dev "dist/$feed" --clobber
+          done
