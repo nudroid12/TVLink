@@ -700,7 +700,7 @@ public class MainActivity extends Activity {
 
     private void pairSystemRemote(Runnable paired, boolean linkFiles) {
         if (remotePairing || busy) return;
-        new AlertDialog.Builder(this).setTitle("Pair TV")
+        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pair TV")
                 .setMessage(linkFiles ? "Open Pair in TVLink on your TV. Keep both devices on the same Wi-Fi."
                         : "Keep your Android TV on and connected to the same network.")
                 .setNegativeButton("Cancel", null)
@@ -733,7 +733,7 @@ public class MainActivity extends Activity {
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
                     if (discovered.isEmpty()) {
-                        new AlertDialog.Builder(this).setTitle("No TV found")
+                        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("No TV found")
                                 .setMessage(linkFiles ? "Open Pair on your TV and check that both devices are on the same Wi-Fi."
                                         : "Keep Android TV on and on the same network. You can also open Pair in TVLink on the TV.")
                                 .setNegativeButton("Cancel", null)
@@ -744,7 +744,7 @@ public class MainActivity extends Activity {
                     } else {
                         String[] hosts = discovered.keySet().toArray(new String[0]);
                         String[] names = discovered.values().toArray(new String[0]);
-                        new AlertDialog.Builder(this).setTitle("Choose your TV")
+                        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Choose your TV")
                                 .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired, linkFiles))
                                 .setNegativeButton("Cancel", null).show();
                     }
@@ -812,7 +812,7 @@ public class MainActivity extends Activity {
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
                     String detail = error.getMessage();
-                    new AlertDialog.Builder(this).setTitle("Could not start Android TV pairing")
+                    new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Could not start Android TV pairing")
                             .setMessage(detail == null ? error.getClass().getSimpleName() : detail)
                             .setNegativeButton("Close", null)
                             .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
@@ -828,15 +828,30 @@ public class MainActivity extends Activity {
         }
         EditText code = new EditText(this);
         code.setSingleLine(true);
-        code.setHint("Example: 58A2F9");
+        code.setHint("······");
+        code.setTextSize(27);
+        code.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+        code.setLetterSpacing(0.24f);
+        code.setGravity(android.view.Gravity.CENTER);
+        code.setContentDescription("Six-character Android TV pairing code");
+        code.setTextColor(0xfff4f6ff);
+        code.setHintTextColor(0xffc0cce4);
+        android.graphics.drawable.GradientDrawable field = new android.graphics.drawable.GradientDrawable();
+        field.setColor(0xff0e1728);
+        field.setCornerRadius(dp(12));
+        field.setStroke(dp(1), 0xff60769f);
+        code.setBackground(field);
+        LinearLayout codeContainer = new LinearLayout(this);
+        codeContainer.setPadding(dp(24), dp(12), dp(24), dp(8));
+        codeContainer.addView(code, new LinearLayout.LayoutParams(-1, dp(62)));
         code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
                 | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         code.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.AllCaps(),
                 new android.text.InputFilter.LengthFilter(6)});
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Enter the code shown on TV")
-                .setMessage("Enter all 6 characters shown by Android TV, including any letters A–F.")
-                .setView(code).setNegativeButton("Cancel", null)
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pair with Android TV")
+                .setMessage("Enter the 6-character code on your TV.")
+                .setView(codeContainer).setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", null).create();
         android.os.Handler timer = new android.os.Handler(android.os.Looper.getMainLooper());
         Runnable expire = () -> {
@@ -847,7 +862,7 @@ public class MainActivity extends Activity {
             remotePairing = false;
             if (!isDestroyed()) {
                 remoteIo.execute(() -> reportPairingStatus(host, "TIMED_OUT"));
-                new AlertDialog.Builder(this).setTitle("Pairing code timed out")
+                new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pairing code timed out")
                         .setNegativeButton("Close", null)
                         .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
             }
@@ -861,7 +876,18 @@ public class MainActivity extends Activity {
         dialog.show();
         timer.postDelayed(expire, 90000);
         code.requestFocus();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+        dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        Button pairButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        pairButton.setEnabled(false);
+        code.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+                pairButton.setEnabled(text.toString().matches("[0-9A-Fa-f]{6}"));
+            }
+            public void afterTextChanged(android.text.Editable text) {}
+        });
+        pairButton.setOnClickListener(view -> {
             String value = code.getText().toString().trim();
             if (!value.matches("[0-9a-fA-F]{6}")) {
                 dialog.setMessage("The code needs 6 characters. You entered " + value.length()
@@ -872,7 +898,7 @@ public class MainActivity extends Activity {
             timer.removeCallbacks(expire);
             dialog.setOnDismissListener(null);
             dialog.dismiss();
-            AlertDialog progress = new AlertDialog.Builder(this).setTitle("Linking TV")
+            AlertDialog progress = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Linking TV")
                     .setMessage("Checking the code on Android TV…").setCancelable(false).show();
             remoteIo.execute(() -> {
                 boolean remoteSaved = false;
@@ -894,7 +920,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         progress.dismiss();
-                        new AlertDialog.Builder(this).setTitle(pairedSuccessfully
+                        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle(pairedSuccessfully
                                 ? "Remote paired · File transfer not connected" : "Could not finish pairing")
                                 .setMessage(error.getMessage())
                                 .setNegativeButton("Close", null)
@@ -911,7 +937,7 @@ public class MainActivity extends Activity {
     }
 
     private AlertDialog pairingProgress(String status) {
-        return new AlertDialog.Builder(this).setTitle("Pair TV")
+        return new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pair TV")
                 .setMessage(status).setCancelable(false).show();
     }
 
@@ -968,7 +994,7 @@ public class MainActivity extends Activity {
                 return;
             }
             progress.dismiss();
-            AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Connect file transfer")
+            AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Connect file transfer")
                     .setMessage("If " + code + " matches on the TV, select Allow on both screens.")
                     .setNegativeButton("Cancel", (d, w) -> answer.complete(false))
                     .setPositiveButton("Allow", (d, w) -> answer.complete(true))
