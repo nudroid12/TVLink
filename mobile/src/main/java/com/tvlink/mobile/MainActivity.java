@@ -132,7 +132,6 @@ public class MainActivity extends Activity {
         toggle(rows, "Launch at startup", "Open TVLink at boot when supported", "startup", false);
         toggle(rows, "Overwrite", "Replace files with the same name", "overwrite", false);
         toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
-        setting(rows, "Receive Files", "View incoming transfers", this::showTransfers);
     }
 
     private String transferFolderLabel() {
@@ -159,7 +158,7 @@ public class MainActivity extends Activity {
                                 android.widget.CompoundButton control, Runnable action) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        row.setPaddingRelative(0, dp(8), dp(12), dp(8));
         row.setMinimumHeight(dp(56));
         row.setBackground(flatRowBackground());
         row.setFocusable(true);
