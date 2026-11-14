@@ -57,6 +57,19 @@ public class MainActivity extends Activity {
         return background;
     }
 
+    private StateListDrawable flatRowBackground() {
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        return background;
+    }
+
+    private void styleRowText(TextView text) {
+        text.setTextColor(Color.WHITE);
+        text.setTextSize(18);
+        text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+    }
+
     private Button button(String title, Runnable action) {
         return styleButton(new Button(this), title, action, false);
     }
@@ -169,7 +182,8 @@ public class MainActivity extends Activity {
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
-        boolean showBack = !"Pair".equals(title) && !"Remote".equals(title);
+        boolean showBack = !"Pair".equals(title) && !"Remote".equals(title)
+                && !"My Files".equals(title) && !"Settings".equals(title);
         if (showBack) {
             titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
         }
@@ -180,10 +194,13 @@ public class MainActivity extends Activity {
         heading.setPadding(showBack ? dp(16) : 0, 0, 0, 0);
         titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
         if ("My Files".equals(title)) {
-            titleRow.addView(button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
+            Button sort = button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
                 newestFirst = !newestFirst;
                 showFiles();
-            }), new LinearLayout.LayoutParams(dp(150), dp(42)));
+            });
+            sort.setBackground(flatRowBackground());
+            styleRowText(sort);
+            titleRow.addView(sort, new LinearLayout.LayoutParams(dp(150), dp(42)));
         }
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -261,6 +278,8 @@ public class MainActivity extends Activity {
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
         Button item = button(title + "\n" + detail, action);
+        item.setBackground(flatRowBackground());
+        styleRowText(item);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(14), dp(8), dp(14), dp(8));
         rows.addView(item, new LinearLayout.LayoutParams(-1, dp(62)));
@@ -271,10 +290,10 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         android.widget.CheckBox box = new android.widget.CheckBox(this);
         box.setText(title + "\n" + detail);
-        box.setBackground(tile(0xff1b2740, false));
+        box.setBackground(flatRowBackground());
+        styleRowText(box);
         box.setPadding(dp(12), 0, dp(12), 0);
         box.setChecked(prefs.getBoolean(key, fallback));
-        box.setOnFocusChangeListener((view, focused) -> box.setBackground(tile(focused ? 0xff263a5a : 0xff1b2740, focused)));
         box.setOnCheckedChangeListener((view, checked) -> {
             prefs.edit().putBoolean(key, checked).apply();
         });
@@ -678,10 +697,8 @@ public class MainActivity extends Activity {
         row.setPadding(dp(16), 0, dp(16), 0);
         row.setFocusable(true);
         row.setOnClickListener(view -> fileActions(file));
-        row.setBackground(highlightOnFocus(0xff101f3c));
-        LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, dp(62));
-        rowSize.bottomMargin = dp(4);
-        body.addView(row, rowSize);
+        row.setBackground(flatRowBackground());
+        body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_document);
         String filename = file.getName();
@@ -710,25 +727,18 @@ public class MainActivity extends Activity {
         name.setText(filename);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        name.setTextColor(0xff20c7f3);
-        name.setTextSize(19);
+        styleRowText(name);
         labels.addView(name);
         TextView size = new TextView(this);
         size.setText(android.text.format.Formatter.formatShortFileSize(this, file.length()));
-        size.setTextColor(Color.WHITE);
+        styleRowText(size);
         labels.addView(size);
         TextView date = new TextView(this);
         date.setText(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,
                 java.text.DateFormat.SHORT).format(new java.util.Date(file.lastModified())));
-        date.setTextColor(Color.WHITE);
-        date.setTextSize(15);
+        styleRowText(date);
         row.addView(date);
-        row.setOnFocusChangeListener((view, focused) -> {
-            int textColor = focused ? 0xff0c1c35 : Color.WHITE;
-            name.setTextColor(focused ? textColor : 0xff20c7f3);
-            size.setTextColor(textColor);
-            date.setTextColor(textColor);
-        });
+        divider(body);
     }
 
     private void fileActions(File file) {
