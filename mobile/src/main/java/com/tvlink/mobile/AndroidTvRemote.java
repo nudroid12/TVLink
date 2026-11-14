@@ -15,35 +15,42 @@ import javax.net.ssl.*;
 
 // Android TV Remote v2 wire format, cross-checked against tronikos/androidtvremote2.
 final class AndroidTvRemote implements AutoCloseable {
-    private static final String ALIAS = "tvlink_android_tv_remote";
+    private static final String LEGACY_ALIAS = "tvlink_android_tv_remote";
+    private static final String TLS_ALIAS = "tvlink_android_tv_remote_tls";
     private final SSLSocket socket;
     private final DataInputStream input;
     private final OutputStream output;
     private final X509Certificate identity;
     private volatile boolean closed;
 
-    AndroidTvRemote(String host, boolean pairing, String pin) throws Exception {
+    AndroidTvRemote(String host, boolean pairing, String pin, boolean legacyIdentity) throws Exception {
         KeyStore keys = KeyStore.getInstance("AndroidKeyStore");
         keys.load(null);
-        if (!keys.containsAlias(ALIAS)) {
+        // Existing certificates cannot have their authorized digests updated in place.
+        String alias = !pairing && legacyIdentity && keys.containsAlias(LEGACY_ALIAS)
+                ? LEGACY_ALIAS : TLS_ALIAS;
+        if (!keys.containsAlias(alias)) {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore");
-            generator.initialize(new KeyGenParameterSpec.Builder(ALIAS,
+            generator.initialize(new KeyGenParameterSpec.Builder(alias,
                     KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
                     .setKeySize(2048)
-                    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
+                    .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256,
+                            KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                     .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1,
                             KeyProperties.SIGNATURE_PADDING_RSA_PSS).build());
             generator.generateKeyPair();
         }
-        identity = (X509Certificate) keys.getCertificate(ALIAS);
-        PrivateKey key = (PrivateKey) keys.getKey(ALIAS, null);
+        identity = (X509Certificate) keys.getCertificate(alias);
+        PrivateKey key = (PrivateKey) keys.getKey(alias, null);
         X509KeyManager client = new X509ExtendedKeyManager() {
-            public String[] getClientAliases(String type, Principal[] issuers) { return new String[] {ALIAS}; }
-            public String chooseClientAlias(String[] types, Principal[] issuers, java.net.Socket s) { return ALIAS; }
+            public String[] getClientAliases(String type, Principal[] issuers) { return new String[] {alias}; }
+            public String chooseClientAlias(String[] types, Principal[] issuers, java.net.Socket s) { return alias; }
             public String[] getServerAliases(String type, Principal[] issuers) { return null; }
             public String chooseServerAlias(String type, Principal[] issuers, java.net.Socket s) { return null; }
-            public X509Certificate[] getCertificateChain(String alias) { return new X509Certificate[] {identity}; }
-            public PrivateKey getPrivateKey(String alias) { return key; }
+            public X509Certificate[] getCertificateChain(String requestedAlias) {
+                return alias.equals(requestedAlias) ? new X509Certificate[] {identity} : null;
+            }
+            public PrivateKey getPrivateKey(String requestedAlias) { return alias.equals(requestedAlias) ? key : null; }
         };
         X509TrustManager trust = new X509TrustManager() {
             public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }

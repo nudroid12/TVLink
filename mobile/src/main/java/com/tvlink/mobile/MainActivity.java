@@ -556,14 +556,16 @@ public class MainActivity extends Activity {
                 String previousPin = prefs.getString("pending_pin", prefs.getString("remote_pin", ""));
                 if (!previousPin.isEmpty() && previousHost.equals(host)) {
                     try {
-                        finishLink(host, previousPin);
+                        boolean pending = !prefs.getString("pending_pin", "").isEmpty();
+                        boolean legacy = prefs.getBoolean(pending ? "pending_legacy_identity" : "remote_legacy_identity", true);
+                        finishLink(host, previousPin, legacy);
                         showLinkComplete(paired);
                         return;
                     } catch (RemoteUnavailable error) {
                         // Try the system pairing flow if a saved remote connection no longer works.
                     }
                 }
-                pairing = new AndroidTvRemote(host, true, "");
+                pairing = new AndroidTvRemote(host, true, "", false);
                 pairing.beginPairing();
                 AndroidTvRemote pending = pairing;
                 runOnUiThread(() -> enterRemoteCode(pending, host, paired));
@@ -608,7 +610,7 @@ public class MainActivity extends Activity {
             remoteIo.execute(() -> {
                 try (AndroidTvRemote connection = pairing) {
                     String pin = connection.finishPairing(value);
-                    finishLink(host, pin);
+                    finishLink(host, pin, false);
                     showLinkComplete(paired);
                 } catch (Exception error) {
                     runOnUiThread(() -> notifyUser("Pairing failed: " + error.getMessage()));
@@ -623,12 +625,12 @@ public class MainActivity extends Activity {
         RemoteUnavailable(Exception cause) { super(cause.getMessage(), cause); }
     }
 
-    private void finishLink(String host, String pin) throws Exception {
+    private void finishLink(String host, String pin, boolean legacyIdentity) throws Exception {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String token = prefs.getString("pending_token", "");
         if (!host.equals(prefs.getString("pending_host", "")) || token.isEmpty()) token = LinkKeys.newToken();
         if (!prefs.edit().putString("pending_host", host).putString("pending_pin", pin)
-                .putString("pending_token", token).commit()) {
+                .putString("pending_token", token).putBoolean("pending_legacy_identity", legacyIdentity).commit()) {
             throw new IOException("Could not save pending pairing");
         }
 
@@ -636,7 +638,7 @@ public class MainActivity extends Activity {
         if (!confirmLink(host, token)) {
             AndroidTvRemote remote;
             try {
-                remote = new AndroidTvRemote(host, false, pin);
+                remote = new AndroidTvRemote(host, false, pin, legacyIdentity);
                 try {
                     remote.start();
                 } catch (Exception error) {
@@ -654,7 +656,8 @@ public class MainActivity extends Activity {
             }
         }
         if (!prefs.edit().putString("remote_host", host).putString("remote_pin", pin)
-                .putString("link_token", token).remove("pending_host").remove("pending_pin")
+                .putString("link_token", token).putBoolean("remote_legacy_identity", legacyIdentity)
+                .remove("pending_host").remove("pending_pin").remove("pending_legacy_identity")
                 .remove("pending_token").commit()) {
             throw new IOException("Could not save the link on this phone");
         }
@@ -701,6 +704,7 @@ public class MainActivity extends Activity {
         String host = prefs.getString("remote_host", "");
         String pin = prefs.getString("remote_pin", "");
         String token = prefs.getString("link_token", "");
+        boolean legacyIdentity = prefs.getBoolean("remote_legacy_identity", true);
         if (host.isEmpty() || pin.isEmpty()) {
             pairSystemRemote();
             return;
@@ -710,12 +714,12 @@ public class MainActivity extends Activity {
                 if (remoteConnection == null || !remoteConnection.isOpen()) {
                     closeSystemRemote();
                     try {
-                        startRemote(host, pin);
+                        startRemote(host, pin, legacyIdentity);
                     } catch (Exception previousAddressUnavailable) {
                         closeSystemRemote();
                         String resolved = LinkNetwork.resolve(host, token);
                         if (resolved.equals(host)) throw previousAddressUnavailable;
-                        startRemote(resolved, pin);
+                        startRemote(resolved, pin, legacyIdentity);
                         prefs.edit().putString("remote_host", resolved).apply();
                     }
                 }
@@ -728,8 +732,8 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startRemote(String host, String pin) throws Exception {
-        remoteConnection = new AndroidTvRemote(host, false, pin);
+    private void startRemote(String host, String pin, boolean legacyIdentity) throws Exception {
+        remoteConnection = new AndroidTvRemote(host, false, pin, legacyIdentity);
         remoteConnection.start();
     }
 
