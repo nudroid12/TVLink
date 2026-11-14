@@ -66,6 +66,14 @@ public class MainActivity extends Activity {
         return shape;
     }
 
+    private StateListDrawable flatRowBackground() {
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        return background;
+    }
+
     private Button button(String title, Runnable action) {
         return styleButton(new Button(this), title, action, false);
     }
@@ -102,7 +110,9 @@ public class MainActivity extends Activity {
         title.setText("Settings");
         title.setTextSize(23);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.addView(title, new LinearLayout.LayoutParams(-1, dp(44)));
+        title.setTextColor(Color.WHITE);
+        title.setMinHeight(dp(44));
+        toolbar.addView(title, new LinearLayout.LayoutParams(-1, -2));
         divider(page);
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -122,9 +132,11 @@ public class MainActivity extends Activity {
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
         Button item = button(title + "\n" + detail, action);
+        item.setBackground(flatRowBackground());
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        item.setPadding(dp(14), dp(8), dp(14), dp(8));
-        rows.addView(item, new LinearLayout.LayoutParams(-1, dp(62)));
+        item.setPadding(dp(12), dp(12), dp(12), dp(12));
+        item.setMinHeight(dp(48));
+        rows.addView(item, new LinearLayout.LayoutParams(-1, -2));
         divider(rows);
     }
 
@@ -132,15 +144,17 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         android.widget.CheckBox box = new android.widget.CheckBox(this);
         box.setText(title + "\n" + detail);
-        box.setBackground(tile(0xff1b2740, false));
-        box.setPadding(dp(12), 0, dp(12), 0);
+        box.setBackground(flatRowBackground());
+        box.setTextColor(Color.WHITE);
+        box.setTextSize(16);
+        box.setMinHeight(dp(48));
+        box.setPadding(dp(12), dp(12), dp(12), dp(12));
         box.setChecked(prefs.getBoolean(key, fallback));
-        box.setOnFocusChangeListener((view, focused) -> box.setBackground(tile(focused ? 0xff263a5a : 0xff1b2740, focused)));
         box.setOnCheckedChangeListener((view, checked) -> {
             prefs.edit().putBoolean(key, checked).apply();
 
         });
-        rows.addView(box, new LinearLayout.LayoutParams(-1, dp(62)));
+        rows.addView(box, new LinearLayout.LayoutParams(-1, -2));
         divider(rows);
     }
 
@@ -237,22 +251,31 @@ public class MainActivity extends Activity {
         LinearLayout page = screen(null);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(header, new LinearLayout.LayoutParams(-1, dp(52)));
+        header.setMinimumHeight(dp(52));
+        page.addView(header, new LinearLayout.LayoutParams(-1, -2));
         ImageView wordmark = new ImageView(this);
         wordmark.setImageResource(R.drawable.tvlink_wordmark);
         wordmark.setScaleType(ImageView.ScaleType.FIT_CENTER);
         wordmark.setContentDescription("TVLink");
-        header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
-        header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button pair = button(hasRemotePairing() ? linkedTvName() : "Pair", this::pairMenu);
+        boolean linked = hasRemotePairing();
+        LinearLayout.LayoutParams logoSize = linked
+                ? new LinearLayout.LayoutParams(0, dp(52), 2)
+                : new LinearLayout.LayoutParams(dp(TV ? 154 : 116), dp(52));
+        header.addView(wordmark, logoSize);
+        if (!linked) {
+            header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        }
+
+        Button pair = button(linked ? linkedTvName() : "Pair", this::pairMenu);
         homePair = pair;
-        pair.setSingleLine(true);
-        pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        if (hasRemotePairing()) {
+        if (linked) {
             pair.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_link, 0, 0, 0);
             pair.setCompoundDrawablePadding(dp(6));
-            pair.setPadding(dp(8), 0, dp(8), 0);
-            header.addView(pair, new LinearLayout.LayoutParams(0, dp(48), 3));
+            pair.setPadding(dp(8), dp(6), dp(8), dp(6));
+            pair.setMinHeight(dp(48));
+            LinearLayout.LayoutParams linkedSize = new LinearLayout.LayoutParams(0, -2, 3);
+            linkedSize.setMarginStart(dp(8));
+            header.addView(pair, linkedSize);
         } else {
             header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
         }
@@ -302,7 +325,9 @@ public class MainActivity extends Activity {
     private LinearLayout feature(String title) {
         showingHome = false;
         LinearLayout page = screen(title);
-        page.addView(button("Back", this::home));
+        if (!"Send".equals(title) && !"My Files".equals(title)) {
+            page.addView(button("Back", this::home));
+        }
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout body = new LinearLayout(this);
@@ -617,8 +642,12 @@ public class MainActivity extends Activity {
         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(48), 1);
         left.setMarginEnd(dp(8));
-        row.addView(button(first, firstAction), left);
-        row.addView(button(second, secondAction), new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button firstButton = button(first, firstAction);
+        firstButton.setBackground(flatRowBackground());
+        row.addView(firstButton, left);
+        Button secondButton = button(second, secondAction);
+        secondButton.setBackground(flatRowBackground());
+        row.addView(secondButton, new LinearLayout.LayoutParams(0, dp(48), 1));
     }
 
     private void addLocalFileRow(LinearLayout body, File file) {
@@ -628,14 +657,9 @@ public class MainActivity extends Activity {
         row.setMinimumHeight(dp(64));
         row.setFocusable(true);
         row.setOnClickListener(view -> fileActions(file));
-        StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
-        background.addState(new int[] {}, tile(0xff1b2740, false));
-        row.setBackground(background);
-        LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, -2);
-        rowSize.topMargin = dp(6);
-        body.addView(row, rowSize);
+        row.setBackground(flatRowBackground());
+        body.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        divider(body);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_document);
@@ -648,7 +672,8 @@ public class MainActivity extends Activity {
         TextView name = new TextView(this);
         name.setText(file.getName());
         name.setTextSize(16);
-        name.setTextColor(0xff9ac2ff);
+        name.setTextColor(Color.WHITE);
+        name.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         name.setMaxLines(2);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         labels.addView(name);
