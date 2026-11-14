@@ -21,6 +21,7 @@ public class MainActivity extends Activity {
     private boolean showingHome;
 
     @Override public void onCreate(Bundle state) {
+        setTheme(R.style.TVLinkTheme);
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
@@ -35,7 +36,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(0xff060f25);
+        page.setBackgroundColor(0xff0b1329);
         deviceCardName = null;
         deviceCard = null;
         setContentView(page);
@@ -46,20 +47,20 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? 0xff9ac2ff : 0xff3a4b6b);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? 0xffaec0ff : 0xff82aaff);
         return shape;
     }
 
     private StateListDrawable highlightOnFocus(int fill) {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff1dbaf1, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xffaec0ff, true));
         background.addState(new int[] {}, tile(fill, false));
         return background;
     }
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff31446d, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
@@ -77,12 +78,12 @@ public class MainActivity extends Activity {
     private Button styleButton(Button button, String title, Runnable action, boolean primary) {
         button.setText(title);
         button.setAllCaps(false);
-        button.setTextColor(primary ? 0xff0c1c35 : Color.WHITE);
+        button.setTextColor(primary ? 0xff0b1329 : Color.WHITE);
         button.setTextSize(18);
         button.setGravity(Gravity.CENTER);
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? 0xff9ac2ff : 0xff263a5a, true));
-        background.addState(new int[] {}, tile(primary ? 0xff9ac2ff : 0xff1b2740, false));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? 0xffaec0ff : 0xff31446d, true));
+        background.addState(new int[] {}, tile(primary ? 0xffaec0ff : 0xff1b2740, false));
         button.setBackground(background);
         button.setOnClickListener(view -> action.run());
         return button;
@@ -129,7 +130,7 @@ public class MainActivity extends Activity {
         if (pairedHeader != null) {
             pairedHeader.setText(linked ? peerName() : "Pair");
             pairedHeader.setCompoundDrawablesRelativeWithIntrinsicBounds(
-                    linked ? R.drawable.ic_link : 0, 0, 0, 0);
+                    linked ? R.drawable.ic_phone : 0, 0, 0, 0);
         }
         if (deviceCardName != null && linked) deviceCardName.setText(peerName());
         if (deviceCard != null && !linked) {
@@ -231,7 +232,7 @@ public class MainActivity extends Activity {
             card.setBackground(highlightOnFocus(0xff1b2740));
             card.setTextColor(new android.content.res.ColorStateList(
                     new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
-                    new int[] {0xff0c1c35, Color.WHITE}));
+                    new int[] {0xff0b1329, Color.WHITE}));
             android.graphics.drawable.Drawable icon = getDrawable(icons[index]).mutate();
             int iconSize = Math.min(dp(56), width / 2);
             icon.setBounds(0, 0, iconSize, iconSize);
@@ -240,7 +241,7 @@ public class MainActivity extends Activity {
             card.setTextSize(22);
             card.getCompoundDrawables()[1].mutate().setTintList(new android.content.res.ColorStateList(
                     new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
-                    new int[] {0xff0c1c35, Color.WHITE}));
+                    new int[] {0xff0b1329, Color.WHITE}));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
             row.addView(card, params);
             row.addView(new android.view.View(this),

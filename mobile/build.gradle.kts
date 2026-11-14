@@ -6,7 +6,7 @@ android {
         applicationId = "com.tvlink.mobile"
         minSdk = 24
         targetSdk = 34
-        versionCode = 34
-        versionName = "0.5.20"
+        versionCode = 35
+        versionName = "0.5.21"
     }
 }

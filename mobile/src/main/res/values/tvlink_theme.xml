@@ -1,0 +1,5 @@
+<resources>
+    <style name="TVLinkTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#AEC0FF</item>
+    </style>
+</resources>

@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
             };
 
     @Override public void onCreate(Bundle state) {
+        setTheme(R.style.TVLinkTheme);
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
@@ -46,7 +47,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(0xff101624);
+        page.setBackgroundColor(REMOTE_NAVY);
         setContentView(page);
         if (title == null) return page;
         TextView heading = new TextView(this);
@@ -62,14 +63,14 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? 0xff9ac2ff : 0xff3a4b6b);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? REMOTE_BLUE : REMOTE_OUTLINE);
         return shape;
     }
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff31446d, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff31446d, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
@@ -81,12 +82,12 @@ public class MainActivity extends Activity {
     private Button styleButton(Button button, String title, Runnable action, boolean primary) {
         button.setText(title);
         button.setAllCaps(false);
-        button.setTextColor(primary ? 0xff0c1c35 : Color.WHITE);
+        button.setTextColor(primary ? REMOTE_NAVY : Color.WHITE);
         button.setTextSize(TV ? 20 : 16);
         button.setGravity(Gravity.CENTER);
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? 0xff9ac2ff : 0xff263a5a, true));
-        background.addState(new int[] {}, tile(primary ? 0xff9ac2ff : 0xff1b2740, false));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? REMOTE_BLUE : 0xff31446d, true));
+        background.addState(new int[] {}, tile(primary ? REMOTE_BLUE : 0xff1b2740, false));
         button.setBackground(background);
         button.setOnClickListener(view -> action.run());
         return button;
@@ -266,10 +267,10 @@ public class MainActivity extends Activity {
             header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
         }
 
-        Button pair = button(linked ? linkedTvName() : "Pair", this::pairMenu);
+        Button pair = button(linked ? linkedTvName() : "Pair", this::showDevice);
         homePair = pair;
         if (linked) {
-            pair.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_link, 0, 0, 0);
+            pair.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_tv, 0, 0, 0);
             pair.setCompoundDrawablePadding(dp(6));
             pair.setPadding(dp(8), dp(6), dp(8), dp(6));
             pair.setMinHeight(dp(48));
@@ -312,7 +313,7 @@ public class MainActivity extends Activity {
             item.setPadding(dp(2), dp(10), dp(2), dp(10));
             item.setSingleLine(true);
             item.setTextSize(16);
-            if (primary) item.getCompoundDrawables()[1].setTint(0xff0c1c35);
+            if (primary) item.getCompoundDrawables()[1].setTint(REMOTE_NAVY);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(100));
             if (index > 0) params.topMargin = dp(20);
             menu.addView(item, params);
@@ -325,7 +326,7 @@ public class MainActivity extends Activity {
     private LinearLayout feature(String title) {
         showingHome = false;
         LinearLayout page = screen(title);
-        if (!"Send".equals(title) && !"My Files".equals(title)) {
+        if (!"Send".equals(title) && !"My Files".equals(title) && !"Device".equals(title)) {
             page.addView(button("Back", this::home));
         }
         ScrollView scroll = new ScrollView(this);
@@ -388,19 +389,43 @@ public class MainActivity extends Activity {
         return !settings.getString("remote_host", "").isEmpty() && !settings.getString("remote_pin", "").isEmpty();
     }
 
-    private void pairMenu() {
+    private void showDevice() {
+        remoteStatus = null;
+        LinearLayout body = feature("Device");
         if (!hasRemotePairing()) {
-            pairSystemRemote(this::home, false);
+            info(body, "Keep your Android TV on and connected to the same network.");
+            body.addView(button("Find TV", () -> {
+                if (!busy) findPairingTv(this::showDevice, false);
+            }));
             return;
         }
-        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Device")
-                .setMessage(linkedTvName() + "\n" + (hasFilePairing() ? "Remote and file transfers paired."
-                        : "Remote paired · File transfer not connected"))
-                .setNegativeButton("Close", null)
-                .setNeutralButton("Unpair", (dialog, choice) -> confirmUnpair())
-                .setPositiveButton(hasFilePairing() ? "Change TV" : "Connect file transfer",
-                        (dialog, choice) -> pairSystemRemote(this::home, !hasFilePairing()))
-                .show();
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
+        card.setBackground(tile(REMOTE_NAVY, false));
+        body.addView(card, new LinearLayout.LayoutParams(-1, -2));
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_tv);
+        card.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView name = info(card, linkedTvName());
+        name.setTextColor(Color.WHITE);
+        name.setTextSize(20);
+        name.setGravity(Gravity.CENTER);
+
+        boolean linkedFiles = hasFilePairing();
+        TextView status = info(card, linkedFiles ? "Remote and file transfers paired."
+                : "Remote paired · File transfer not connected");
+        status.setGravity(Gravity.CENTER);
+        card.addView(button("Unpair", this::confirmUnpair), new LinearLayout.LayoutParams(-1, -2));
+
+        Button change = button(linkedFiles ? "Change TV" : "Connect file transfer",
+                () -> pairSystemRemote(this::showDevice, !linkedFiles));
+        LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-1, -2);
+        action.topMargin = dp(12);
+        body.addView(change, action);
     }
 
     private String linkedTvName() {
@@ -899,7 +924,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams reconnectSize = new LinearLayout.LayoutParams(dp(144), dp(44));
         reconnectSize.gravity = Gravity.CENTER;
         page.addView(reconnect, reconnectSize);
-        status.setOnClickListener(view -> pairMenu());
+        status.setOnClickListener(view -> showDevice());
         status.setContentDescription("Connection status. Tap for paired device options.");
 
         ScrollView scroll = new ScrollView(this);
