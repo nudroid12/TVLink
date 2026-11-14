@@ -26,9 +26,9 @@ public class MainActivity extends Activity {
     private Button homePair;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
             (prefs, key) -> {
-                if ("link_token".equals(key) && this.started) {
-                    if (hasFilePairing()) startReceiver();
-                    else closeReceiver();
+                if (("link_token".equals(key) || "remote_host".equals(key) || "receive".equals(key))
+                        && this.started) {
+                    startReceiver();
                 }
                 if ("peer_name".equals(key) || "remote_name".equals(key)) {
                     if (showingHome && homePair != null && hasRemotePairing()) {
@@ -273,13 +273,35 @@ public class MainActivity extends Activity {
         receiver = null;
     }
 
+    private final android.os.Handler receiverHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable retryReceiver = this::startReceiver;
+    private TextView homeReceiveStatus;
+    private String receiverError;
+
     private void startReceiver() {
-        if (!started || receiver != null || !hasFilePairing()) return;
-        try {
-            receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
-        } catch (IOException error) {
-            notifyUser("Cannot start receiver: " + error.getMessage());
+        receiverHandler.removeCallbacks(retryReceiver);
+        if (!started) return;
+        if (!hasFilePairing() || !getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+            closeReceiver();
+            receiverError = null;
+        } else if (receiver == null) {
+            try {
+                receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
+                receiverError = null;
+            } catch (IOException | SecurityException error) {
+                receiverError = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+                android.util.Log.w("TVLink", "Cannot start file receiver", error);
+                receiverHandler.postDelayed(retryReceiver, 3000);
+            }
         }
+        if (showingHome && homeReceiveStatus != null) homeReceiveStatus.setText(receiveStatus());
+    }
+
+    private String receiveStatus() {
+        if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) return "Receive Transfers is off";
+        if (!hasFilePairing()) return "Pair TV to receive files";
+        if (receiver != null) return "Ready to receive";
+        return receiverError == null ? "Starting receiver…" : "Could not start receiver: " + receiverError;
     }
 
     private void showTransfers() {
@@ -302,6 +324,12 @@ public class MainActivity extends Activity {
         showingHome = true;
         LinearLayout page = screen(null);
         addHeader(page);
+        homeReceiveStatus = new TextView(this);
+        homeReceiveStatus.setText(receiveStatus());
+        homeReceiveStatus.setTextColor(0xffb8c3d6);
+        homeReceiveStatus.setTextSize(13);
+        homeReceiveStatus.setGravity(Gravity.CENTER);
+        page.addView(homeReceiveStatus);
 
         LinearLayout menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.VERTICAL);
@@ -387,13 +415,12 @@ public class MainActivity extends Activity {
         icon.setColorFilter(REMOTE_NAVY);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        card.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        card.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
 
         TextView label = new TextView(this);
         label.setText(title);
         label.setTextColor(REMOTE_NAVY);
-        label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        label.setTextSize(18);
+        label.setTextSize(16);
         label.setGravity(Gravity.CENTER);
         label.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams labelSize = new LinearLayout.LayoutParams(-1, -2);
@@ -701,7 +728,7 @@ public class MainActivity extends Activity {
                 if (!incoming.isEmpty()) message = incoming;
                 else if (!enabled) message = "Receive Transfers is disabled in Settings.";
                 else if (!paired) message = "Pair to receive files.";
-                else if (receiver == null) message = "Could not start receiver.";
+                else if (receiver == null) message = receiveStatus();
                 else message = "●  Ready to receive from " + linkedTvName() + ".";
                 if (!message.contentEquals(status.getText())) {
                     android.text.SpannableString label = new android.text.SpannableString(message);
@@ -1747,6 +1774,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onStop() {
         started = false;
+        receiverHandler.removeCallbacks(retryReceiver);
         closeReceiver();
         super.onStop();
     }

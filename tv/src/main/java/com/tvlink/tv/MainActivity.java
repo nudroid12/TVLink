@@ -204,15 +204,6 @@ public class MainActivity extends Activity {
         heading.setTextColor(Color.WHITE);
         heading.setPadding(showBack ? dp(16) : 0, 0, 0, 0);
         titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        if ("My Files".equals(title)) {
-            Button sort = button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
-                newestFirst = !newestFirst;
-                renderFiles();
-            });
-            sort.setBackground(flatRowBackground());
-            styleRowText(sort);
-            titleRow.addView(sort, new LinearLayout.LayoutParams(dp(150), dp(42)));
-        }
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout body = new LinearLayout(this);
@@ -751,7 +742,7 @@ public class MainActivity extends Activity {
         try {
             address = LinkNetwork.resolve(host, token);
         } catch (IOException error) {
-            throw new IOException("On your phone, open TVLink → Send / Receive and check that it says Ready to receive.\n\n"
+            throw new IOException("Keep TVLink open on your phone and check its receive status on Home.\n\n"
                     + error.getMessage(), error);
         }
         if (session.cancelled) throw new IOException("Transfer cancelled");
@@ -842,9 +833,17 @@ public class MainActivity extends Activity {
         LinearLayout body = feature("My Files");
         storageFolder = folderToRender;
         boolean browsing = storageFolder != null;
-        Button browse = button(browsing ? "Received files" : "Browse storage",
-                browsing ? this::showFiles : this::browseStorage);
-        body.addView(browse, new LinearLayout.LayoutParams(dp(208), dp(44)));
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
+        addFilesToolbarButton(toolbar, "Received", this::showFiles);
+        Button browse = addFilesToolbarButton(toolbar, "Browse storage", this::browseStorage);
+        toolbar.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        addFilesToolbarButton(toolbar, "Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
+            newestFirst = !newestFirst;
+            renderFiles();
+        });
+        divider(body);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
@@ -861,8 +860,18 @@ public class MainActivity extends Activity {
                 ? java.util.Comparator.comparingLong(File::lastModified).reversed().thenComparing(byName)
                 : byName);
         if (browsing) java.util.Arrays.sort(files, java.util.Comparator.comparing(File::isFile));
+        int firstFile = body.getChildCount();
         for (File file : files) addFileRow(body, file);
-        body.getChildAt(browsing ? 2 : 1).requestFocus();
+        body.getChildAt(firstFile).requestFocus();
+    }
+
+    private Button addFilesToolbarButton(LinearLayout toolbar, String title, Runnable action) {
+        Button item = button(title, action);
+        item.setBackground(flatRowBackground());
+        styleRowText(item);
+        item.setPadding(dp(14), 0, dp(14), 0);
+        toolbar.addView(item, new LinearLayout.LayoutParams(-2, dp(44)));
+        return item;
     }
 
     private void addFileRow(LinearLayout body, File file) {
@@ -879,19 +888,6 @@ public class MainActivity extends Activity {
             }
         });
         row.setBackground(flatRowBackground());
-        row.setOnFocusChangeListener((view, focused) -> {
-            int color = focused ? 0xff0c1c35 : Color.WHITE;
-            for (int i = 0; i < row.getChildCount(); i++) {
-                android.view.View child = row.getChildAt(i);
-                if (child instanceof TextView) ((TextView) child).setTextColor(color);
-                if (child instanceof LinearLayout) {
-                    LinearLayout labels = (LinearLayout) child;
-                    for (int j = 0; j < labels.getChildCount(); j++) {
-                        ((TextView) labels.getChildAt(j)).setTextColor(color);
-                    }
-                }
-            }
-        });
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(file.isDirectory() ? R.drawable.ic_files : R.drawable.ic_document);
@@ -905,7 +901,13 @@ public class MainActivity extends Activity {
                         archive.applicationInfo.sourceDir = path;
                         archive.applicationInfo.publicSourceDir = path;
                         android.graphics.drawable.Drawable appIcon = archive.applicationInfo.loadIcon(getPackageManager());
-                        runOnUiThread(() -> { if (icon.isAttachedToWindow()) icon.setImageDrawable(appIcon); });
+                        runOnUiThread(() -> {
+                            if (icon.isAttachedToWindow()) {
+                                icon.setTag(Boolean.TRUE);
+                                icon.clearColorFilter();
+                                icon.setImageDrawable(appIcon);
+                            }
+                        });
                     }
                 } catch (RuntimeException error) {
                     android.util.Log.d("TVLink", "Could not load APK icon", error);
@@ -926,12 +928,27 @@ public class MainActivity extends Activity {
         TextView size = new TextView(this);
         size.setText(file.isDirectory() ? "Folder" : android.text.format.Formatter.formatShortFileSize(this, file.length()));
         styleRowText(size);
+        size.setTextSize(14);
         labels.addView(size);
         TextView date = new TextView(this);
         date.setText(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,
                 java.text.DateFormat.SHORT).format(new java.util.Date(file.lastModified())));
         styleRowText(date);
+        date.setTextSize(14);
         row.addView(date);
+        row.setOnFocusChangeListener((view, focused) -> {
+            int primary = focused ? 0xff0c1c35 : Color.WHITE;
+            int secondary = focused ? 0xff192a46 : 0xffb8c3d6;
+            name.setTextColor(primary);
+            size.setTextColor(secondary);
+            date.setTextColor(secondary);
+            if (!Boolean.TRUE.equals(icon.getTag())) {
+                icon.setColorFilter(primary);
+            }
+        });
+        icon.setColorFilter(Color.WHITE);
+        size.setTextColor(0xffb8c3d6);
+        date.setTextColor(0xffb8c3d6);
         divider(body);
     }
 

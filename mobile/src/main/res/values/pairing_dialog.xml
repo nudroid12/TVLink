@@ -1,5 +1,6 @@
 <resources>
     <style name="TVLinkPairingDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/mobile_dialog_panel</item>
         <item name="android:colorAccent">#7FB1FE</item>
         <item name="android:colorBackground">#19243A</item>
         <item name="android:textColorPrimary">#F4F6FF</item>
