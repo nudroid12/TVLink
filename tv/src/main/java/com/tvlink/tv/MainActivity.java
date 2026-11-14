@@ -66,6 +66,7 @@ public class MainActivity extends Activity {
 
     private TransferServer receiver;
     private TextView pairing;
+    private FileApprovalDialog fileApprovalDialog;
     private final android.os.Handler refresh = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable updatePairing = new Runnable() {
         @Override public void run() {
@@ -74,6 +75,7 @@ public class MainActivity extends Activity {
                 showReceive();
             } else if (receiver != null) {
                 pairing.setText(receiver.pairingStatus());
+                showFileApproval();
                 refresh.postDelayed(this, 400);
             }
         }
@@ -356,37 +358,43 @@ public class MainActivity extends Activity {
         refresh.postDelayed(expireLink, 180000);
     }
 
+    private void showFileApproval() {
+        TransferServer.FileApproval request = receiver.fileApproval();
+        if (fileApprovalDialog != null && fileApprovalDialog.request == request) return;
+        dismissFileApproval();
+        if (request == null) return;
+        TransferServer server = receiver;
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Connect file transfer")
+                .setMessage("Does this number match the phone? " + request.code)
+                .setNegativeButton("Decline", (d, w) -> server.answerFileApproval(request, false))
+                .setPositiveButton("Allow", (d, w) -> server.answerFileApproval(request, true))
+                .setOnCancelListener(d -> server.answerFileApproval(request, false)).show();
+        fileApprovalDialog = new FileApprovalDialog(request, dialog);
+    }
+
+    private void dismissFileApproval() {
+        if (fileApprovalDialog == null) return;
+        fileApprovalDialog.dialog.dismiss();
+        fileApprovalDialog = null;
+    }
+
+    private static final class FileApprovalDialog {
+        final TransferServer.FileApproval request;
+        final AlertDialog dialog;
+        FileApprovalDialog(TransferServer.FileApproval request, AlertDialog dialog) {
+            this.request = request;
+            this.dialog = dialog;
+        }
+    }
+
     private final Runnable expireLink = () -> {
         refresh.removeCallbacks(updatePairing);
+        dismissFileApproval();
         if (receiver == null || pairing == null) return;
         boolean remotePaired = receiver.pairingStatus().startsWith("Phone reports Remote paired");
         receiver.enableLinking(false);
         if (!remotePaired) pairing.setText("Pairing timed out. Press Back and reopen Pair to try again.");
     };
-
-    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-        if (pairing != null && receiver != null && hasWindowFocus()) {
-            int digit = linkDigit(event.getKeyCode());
-            if (digit != -2) {
-                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                    receiver.linkKey(digit);
-                }
-                return true;
-            }
-        }
-        return super.dispatchKeyEvent(event);
-    }
-
-    private static int linkDigit(int key) {
-        switch (key) {
-            case android.view.KeyEvent.KEYCODE_DPAD_CENTER: return -1;
-            case android.view.KeyEvent.KEYCODE_DPAD_UP: return 0;
-            case android.view.KeyEvent.KEYCODE_DPAD_DOWN: return 1;
-            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: return 2;
-            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: return 3;
-            default: return -2;
-        }
-    }
 
     private void showReceive() {
         LinearLayout body = feature("Receive Files");
@@ -552,6 +560,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopPairingDisplay() {
+        dismissFileApproval();
         if (pairing != null && receiver != null) receiver.enableLinking(false);
         pairing = null;
         refresh.removeCallbacks(updatePairing);

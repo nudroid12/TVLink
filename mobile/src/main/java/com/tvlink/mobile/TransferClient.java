@@ -17,7 +17,8 @@ final class TransferClient implements AutoCloseable {
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
             out.writeUTF(operation);
-            if ("LINK".equals(operation)) {
+            if ("PAIR_FILES".equals(operation)) {
+                socket.setSoTimeout(65000);
                 out.writeUTF(credential);
             } else {
                 String clientNonce = java.util.UUID.randomUUID().toString();
@@ -40,6 +41,21 @@ final class TransferClient implements AutoCloseable {
         String result = in.readUTF();
         if ("ERROR".equals(result)) throw new IOException(in.readUTF());
         if (!expected.equals(result)) throw new IOException("Unexpected response from device");
+    }
+
+    FilePairing.Result exchangeFileKeys(java.security.KeyPair key, String clientKey)
+            throws IOException, java.security.GeneralSecurityException {
+        expect("PAIR_KEY");
+        String serverKey = in.readUTF();
+        FilePairing.Result result = FilePairing.derive(key, clientKey, serverKey, true);
+        out.writeUTF(clientKey);
+        out.flush();
+        return result;
+    }
+
+    void approveFileLink() throws IOException {
+        out.writeUTF("ALLOW");
+        out.flush();
     }
 
     void confirm() throws IOException {

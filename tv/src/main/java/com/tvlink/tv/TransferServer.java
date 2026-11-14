@@ -61,32 +61,90 @@ final class TransferServer implements AutoCloseable {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
-    private final LinkKeys linkKeys = new LinkKeys();
+    private boolean pairingEnabled;
+    private FileApproval approval;
 
-    void enableLinking(boolean enabled) {
-        linkKeys.enable(enabled);
+    synchronized void enableLinking(boolean enabled) {
+        pairingEnabled = enabled;
+        if (!enabled) {
+            if (approval != null && !Boolean.TRUE.equals(approval.allowed) && active != null) {
+                try { active.close(); } catch (IOException ignored) {}
+            }
+            approval = null;
+            notifyAll();
+        }
         discovery.enablePairingDiscovery(enabled);
     }
 
     String pairingStatus() { return discovery.pairingStatus(); }
 
-    boolean linkKey(int digit) {
-        return linkKeys.input(digit);
+    static final class FileApproval {
+        final String code;
+        Boolean allowed;
+        FileApproval(String code) { this.code = code; }
     }
 
-    private void finishLink(String proof, String host, DataOutputStream out) throws IOException {
-        synchronized (linkKeys) {
-            String token = settings.getString("link_token", "");
-            String savedHost = settings.getString("peer_host", "");
-            boolean retry = !token.isEmpty() && host.equals(savedHost) && equal(LinkKeys.proof(token), proof);
-            if (!retry) {
-                token = linkKeys.verify(proof);
-                if (token == null) throw new IOException("Open Pair on the TV and try again");
-                if (!settings.edit().putString("peer_host", host).putString("link_token", token).commit()) {
+    synchronized FileApproval fileApproval() { return approval; }
+
+    synchronized void answerFileApproval(FileApproval request, boolean allowed) {
+        if (approval != request || request.allowed != null) return;
+        request.allowed = allowed;
+        notifyAll();
+    }
+
+    private void finishLink(String commitment, String host, DataInputStream in, DataOutputStream out, Socket socket)
+            throws IOException {
+        synchronized (this) {
+            if (!pairingEnabled || !settings.getString("link_token", "").isEmpty()) {
+                throw new IOException("Open Pair or Receive on the TV to connect file transfer");
+            }
+        }
+        if (!commitment.matches("[A-Za-z0-9+/]{43}=")) throw new IOException("Invalid pairing request");
+        FilePairing.Result link;
+        try {
+            java.security.KeyPair key = FilePairing.keyPair();
+            String serverKey = FilePairing.encode(key.getPublic().getEncoded());
+            out.writeUTF("PAIR_KEY");
+            out.writeUTF(serverKey);
+            out.flush();
+            String clientKey = in.readUTF();
+            if (clientKey.length() > 256 || !equal(commitment, FilePairing.commitment(clientKey))) {
+                throw new IOException("File pairing key changed");
+            }
+            link = FilePairing.derive(key, clientKey, serverKey, false);
+        } catch (java.security.GeneralSecurityException | IllegalArgumentException error) {
+            throw new IOException("Could not verify file pairing keys", error);
+        }
+
+        FileApproval request = new FileApproval(link.code);
+        long end = android.os.SystemClock.elapsedRealtime() + 55000;
+        synchronized (this) {
+            if (!pairingEnabled || closed) throw new IOException("File pairing cancelled on TV");
+            approval = request;
+        }
+        try {
+            socket.setSoTimeout(55000);
+            if (!"ALLOW".equals(in.readUTF())) throw new IOException("File pairing declined on phone");
+            synchronized (this) {
+                while (approval == request && request.allowed == null) {
+                    long remaining = end - android.os.SystemClock.elapsedRealtime();
+                    if (remaining <= 0) throw new IOException("File pairing timed out");
+                    wait(remaining);
+                }
+                if (approval != request || !Boolean.TRUE.equals(request.allowed)
+                        || android.os.SystemClock.elapsedRealtime() >= end) {
+                    throw new IOException("File pairing declined, cancelled or expired on TV");
+                }
+                if (!settings.edit().putString("peer_host", host).putString("link_token", link.token).commit()) {
                     throw new IOException("Could not save the link on the TV");
                 }
                 enableLinking(false);
             }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException("File pairing interrupted", error);
+        } finally {
+            synchronized (this) { if (approval == request) approval = null; }
         }
         out.writeUTF("OK");
     }
@@ -96,8 +154,8 @@ final class TransferServer implements AutoCloseable {
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         try {
             String operation = in.readUTF();
-            if ("LINK".equals(operation)) {
-                finishLink(in.readUTF(), socket.getInetAddress().getHostAddress(), out);
+            if ("PAIR_FILES".equals(operation)) {
+                finishLink(in.readUTF(), socket.getInetAddress().getHostAddress(), in, out, socket);
             } else {
                 String token = settings.getString("link_token", "");
                 authorize(operation, token, in, out);
@@ -194,6 +252,7 @@ final class TransferServer implements AutoCloseable {
 
     @Override public synchronized void close() {
         closed = true;
+        enableLinking(false);
         discovery.close();
         try { server.close(); } catch (IOException ignored) {}
         try { if (active != null) active.close(); } catch (IOException ignored) {}

@@ -522,6 +522,16 @@ public class MainActivity extends Activity {
         AlertDialog searching = pairingProgress("Searching for TV…");
         remoteIo.execute(() -> {
             try {
+                android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+                String pendingHost = prefs.getString("pending_file_host", "");
+                String pendingToken = prefs.getString("pending_file_token", "");
+                if (linkFiles && !pendingToken.isEmpty() && pendingHost.equals(prefs.getString("remote_host", ""))
+                        && confirmLink(pendingHost, pendingToken)) {
+                    finishLink(pendingHost, searching);
+                    runOnUiThread(searching::dismiss);
+                    showLinkComplete(paired);
+                    return;
+                }
                 java.util.Map<String, String> devices = LinkNetwork.findPairingTvs();
                 runOnUiThread(() -> {
                     searching.dismiss();
@@ -543,11 +553,11 @@ public class MainActivity extends Activity {
                                 .setNegativeButton("Cancel", null).show();
                     }
                 });
-            } catch (IOException error) {
+            } catch (Exception error) {
                 runOnUiThread(() -> {
                     searching.dismiss();
                     remotePairing = false;
-                    notifyUser("Could not search your Wi-Fi for a TV.");
+                    notifyUser(error.getMessage() == null ? "Could not find or link your TV." : error.getMessage());
                 });
             }
         });
@@ -569,8 +579,9 @@ public class MainActivity extends Activity {
                         boolean pending = !prefs.getString("pending_pin", "").isEmpty();
                         boolean legacy = prefs.getBoolean(pending ? "pending_legacy_identity" : "remote_legacy_identity", true);
                         if (linkFiles) {
+                            saveRemotePairing(host, previousPin, legacy);
                             runOnUiThread(() -> connecting.setMessage("Connecting file transfer…"));
-                            finishLink(host, previousPin, legacy);
+                            finishLink(host, connecting);
                         } else {
                             try (AndroidTvRemote remote = new AndroidTvRemote(
                                     getNoBackupFilesDir(), host, false, previousPin, legacy)) {
@@ -677,7 +688,7 @@ public class MainActivity extends Activity {
                     reportPairingStatus(host, "PAIRED");
                     if (linkFiles) {
                         runOnUiThread(() -> progress.setMessage("Remote paired. Connecting file transfer…"));
-                        finishLink(host, pin, false);
+                        finishLink(host, progress);
                     }
                     runOnUiThread(progress::dismiss);
                     showLinkComplete(paired);
@@ -727,59 +738,71 @@ public class MainActivity extends Activity {
         RemoteUnavailable(Exception cause) { super(cause.getMessage(), cause); }
     }
 
-    private void finishLink(String host, String pin, boolean legacyIdentity) throws Exception {
+    private void finishLink(String host, AlertDialog progress) throws Exception {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        String token = prefs.getString("pending_token", "");
-        if (!host.equals(prefs.getString("pending_host", "")) || token.isEmpty()) token = LinkKeys.newToken();
-        if (!prefs.edit().putString("pending_host", host).putString("pending_pin", pin)
-                .putString("pending_token", token).putBoolean("pending_legacy_identity", legacyIdentity).commit()) {
-            throw new IOException("Could not save pending pairing");
-        }
-
-        // A lost response can be retried without re-entering the Android TV code.
-        if (!confirmLink(host, token)) {
-            AndroidTvRemote remote;
-            try {
-                remote = new AndroidTvRemote(getNoBackupFilesDir(), host, false, pin, legacyIdentity);
-                try {
-                    remote.start();
-                } catch (Exception error) {
-                    remote.close();
-                    throw error;
+        String token = host.equals(prefs.getString("pending_file_host", ""))
+                ? prefs.getString("pending_file_token", "") : "";
+        if (token.isEmpty() || !confirmLink(host, token)) {
+            java.security.KeyPair key = FilePairing.keyPair();
+            String clientKey = FilePairing.encode(key.getPublic().getEncoded());
+            try (TransferClient client = new TransferClient(host, "PAIR_FILES", FilePairing.commitment(clientKey))) {
+                FilePairing.Result link = client.exchangeFileKeys(key, clientKey);
+                if (!prefs.edit().putString("pending_file_host", host)
+                        .putString("pending_file_token", link.token).commit()) {
+                    throw new IOException("Could not save pending file pairing");
                 }
-            } catch (Exception error) {
-                throw new RemoteUnavailable(error);
-            }
-            try (AndroidTvRemote connection = remote) {
-                // The system pairing prompt can still be giving focus back to TVLink.
-                Thread.sleep(600);
-                LinkKeys.send(connection, token);
-                if (!confirmLink(host, token)) {
-                    LinkKeys.send(connection, token);
-                    if (!confirmLink(host, token)) {
-                        throw new IOException("Android TV accepted the code, but TVLink could not save the link. "
-                                + "Keep Pair or Receive open on the TV and try again.");
-                    }
-                }
+                confirmFileNumber(progress, link.code);
+                client.approveFileLink();
+                client.confirm();
+                token = link.token;
             }
         }
-        if (!prefs.edit().putString("remote_host", host).putString("remote_pin", pin)
-                .putString("link_token", token).putBoolean("remote_legacy_identity", legacyIdentity)
-                .remove("pending_host").remove("pending_pin").remove("pending_legacy_identity")
-                .remove("pending_token").commit()) {
+        if (!prefs.edit().putString("link_token", token)
+                .remove("pending_file_host").remove("pending_file_token").remove("pending_host")
+                .remove("pending_pin").remove("pending_legacy_identity").remove("pending_token").commit()) {
             throw new IOException("Could not save the link on this phone");
         }
-        closeSystemRemote();
     }
 
-    private boolean confirmLink(String host, String token) throws IOException {
-        try (TransferClient client = new TransferClient(host, "LINK", LinkKeys.proof(token))) {
-            try {
-                client.confirm();
-                return true;
-            } catch (IOException error) {
-                return false;
+    private void confirmFileNumber(AlertDialog progress, String code) throws Exception {
+        java.util.concurrent.CompletableFuture<Boolean> answer = new java.util.concurrent.CompletableFuture<>();
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) {
+                answer.complete(false);
+                return;
             }
+            progress.dismiss();
+            AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Connect file transfer")
+                    .setMessage("If " + code + " matches on the TV, select Allow on both screens.")
+                    .setNegativeButton("Cancel", (d, w) -> answer.complete(false))
+                    .setPositiveButton("Allow", (d, w) -> answer.complete(true))
+                    .setOnDismissListener(d -> answer.complete(false)).show();
+            android.os.Handler timer = new android.os.Handler(android.os.Looper.getMainLooper());
+            Runnable expire = () -> {
+                answer.completeExceptionally(new IOException("File pairing timed out"));
+                dialog.dismiss();
+            };
+            timer.postDelayed(expire, 50000);
+            dialog.setOnDismissListener(d -> {
+                timer.removeCallbacks(expire);
+                answer.complete(false);
+            });
+        });
+        if (!answer.get(55, java.util.concurrent.TimeUnit.SECONDS)) throw new IOException("File pairing cancelled");
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) {
+                progress.setMessage("Waiting for approval on TV…");
+                progress.show();
+            }
+        });
+    }
+
+    private boolean confirmLink(String host, String token) {
+        try (TransferClient client = new TransferClient(host, "PING", token)) {
+            client.confirm();
+            return true;
+        } catch (IOException error) {
+            return false;
         }
     }
 
