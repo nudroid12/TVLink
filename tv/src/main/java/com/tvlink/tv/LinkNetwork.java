@@ -110,7 +110,8 @@ final class LinkNetwork implements AutoCloseable {
             try {
                 return find(token);
             } catch (IOException unavailable) {
-                throw original;
+                throw new IOException("Cannot reach the linked device. Open TVLink on both devices and check the Wi-Fi connection. "
+                        + original.getMessage(), original);
             }
         }
     }
@@ -121,16 +122,49 @@ final class LinkNetwork implements AutoCloseable {
         String expected = sign(token, "found-mobile", nonce);
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setBroadcast(true);
-            socket.send(new DatagramPacket(request, request.length, InetAddress.getByName("255.255.255.255"), PORT));
-            long deadline = android.os.SystemClock.elapsedRealtime() + 2000;
+            long deadline = android.os.SystemClock.elapsedRealtime() + 2400;
             while (android.os.SystemClock.elapsedRealtime() < deadline) {
-                socket.setSoTimeout((int) Math.max(1, deadline - android.os.SystemClock.elapsedRealtime()));
-                DatagramPacket reply = new DatagramPacket(new byte[128], 128);
-                socket.receive(reply);
-                if (matches(expected, decode(reply))) return reply.getAddress().getHostAddress();
+                broadcast(socket, request);
+                long nextProbe = Math.min(deadline, android.os.SystemClock.elapsedRealtime() + 600);
+                while (android.os.SystemClock.elapsedRealtime() < nextProbe) {
+                    socket.setSoTimeout((int) Math.max(1, nextProbe - android.os.SystemClock.elapsedRealtime()));
+                    DatagramPacket reply = new DatagramPacket(new byte[128], 128);
+                    try {
+                        socket.receive(reply);
+                    } catch (SocketTimeoutException timeout) {
+                        break;
+                    }
+                    if (reply.getPort() == PORT && matches(expected, decode(reply))) {
+                        return reply.getAddress().getHostAddress();
+                    }
+                }
             }
         }
         throw new IOException("Linked device not found on Wi-Fi");
+    }
+
+    private static void broadcast(DatagramSocket socket, byte[] request) throws IOException {
+        java.util.Set<InetAddress> targets = new java.util.LinkedHashSet<>();
+        targets.add(InetAddress.getByName("255.255.255.255"));
+        java.util.Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+        while (interfaces != null && interfaces.hasMoreElements()) {
+            NetworkInterface network = interfaces.nextElement();
+            if (!network.isUp() || network.isLoopback()) continue;
+            for (InterfaceAddress address : network.getInterfaceAddresses()) {
+                if (address.getBroadcast() != null) targets.add(address.getBroadcast());
+            }
+        }
+        boolean sent = false;
+        IOException failure = null;
+        for (InetAddress target : targets) {
+            try {
+                socket.send(new DatagramPacket(request, request.length, target, PORT));
+                sent = true;
+            } catch (IOException error) {
+                failure = error;
+            }
+        }
+        if (!sent && failure != null) throw failure;
     }
 
     private static String decode(DatagramPacket packet) {

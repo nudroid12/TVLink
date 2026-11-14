@@ -12,7 +12,10 @@ final class TransferClient implements AutoCloseable {
     private final DataOutputStream out;
 
     TransferClient(String host, String operation, String credential) throws IOException {
-        Socket raw = new Socket();
+        this(host, operation, credential, new Socket());
+    }
+
+    TransferClient(String host, String operation, String credential, Socket raw) throws IOException {
         try {
             raw.connect(new InetSocketAddress(host, 47832), 5000);
             javax.net.ssl.SSLSocket encrypted = TransferTls.wrap(TransferTls.client(), raw, true);
@@ -87,6 +90,7 @@ final class TransferClient implements AutoCloseable {
         }
         out.flush();
         expect("OK");
+        if (last < 100) progress.accept(100);
     }
 
     @Override public void close() throws IOException { socket.close(); }

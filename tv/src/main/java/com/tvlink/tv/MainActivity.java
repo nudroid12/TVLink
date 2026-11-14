@@ -415,33 +415,84 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String host = prefs.getString("peer_host", "");
         String token = prefs.getString("link_token", "");
-        queueSend(() -> {
+        queueSend(session -> {
             try (FileInputStream stream = new FileInputStream(file)) {
-                sendToPhone(host, token, file.getName(), stream.getChannel().size(), stream);
+                sendToPeer(session, host, token, file.getName(), stream.getChannel().size(), stream);
             }
+            return file.getName();
         });
     }
 
-    private interface SendWork { void run() throws IOException; }
+    private interface SendWork { String run(SendSession session) throws IOException; }
 
     private void queueSend(SendWork work) {
+        SendSession session = beginSend();
+        if (session == null) return;
         sender.execute(() -> {
-            try {
-                work.run();
+            try (java.net.Socket socket = session.socket) {
+                String name = work.run(session);
+                finishSend(session, "Sent: " + name);
             } catch (IOException | SecurityException error) {
-                runOnUiThread(() -> notifyUser(error.getMessage()));
+                finishSend(session, session.cancelled ? "Transfer cancelled" : "Could not send: " + error.getMessage());
             }
         });
-        notifyUser("Sending file…");
     }
 
-    private void sendToPhone(String host, String token, String name, long size, InputStream stream)
+    private static final class SendSession {
+        final java.net.Socket socket = new java.net.Socket();
+        final AlertDialog dialog;
+        volatile boolean cancelled;
+
+        SendSession(AlertDialog dialog) { this.dialog = dialog; }
+
+        void cancel() {
+            cancelled = true;
+            try { socket.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    private SendSession activeSend;
+
+    private SendSession beginSend() {
+        if (activeSend != null) {
+            notifyUser("A transfer is already running.");
+            return null;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Send file")
+                .setMessage("Preparing file…").setCancelable(false).setNegativeButton("Cancel", null).show();
+        SendSession session = new SendSession(dialog);
+        activeSend = session;
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+            session.dialog.setMessage("Cancelling transfer…");
+            session.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+            session.cancel();
+        });
+        return session;
+    }
+
+    private void finishSend(SendSession session, String outcome) {
+        runOnUiThread(() -> {
+            if (activeSend == session) activeSend = null;
+            session.dialog.dismiss();
+            if (!isFinishing() && !isDestroyed()) notifyUser(outcome);
+        });
+    }
+
+    private void sendToPeer(SendSession session, String host, String token, String name, long size, InputStream stream)
             throws IOException {
         if (stream == null) throw new IOException("Cannot read file");
-        try (TransferClient client = new TransferClient(LinkNetwork.resolve(host, token), "SEND", token)) {
-            client.send(name, size, stream, percent -> {});
+        if (session.cancelled) throw new IOException("Transfer cancelled");
+        runOnUiThread(() -> {
+            if (!session.cancelled) session.dialog.setMessage("Finding linked device…");
+        });
+        String address = LinkNetwork.resolve(host, token);
+        if (session.cancelled) throw new IOException("Transfer cancelled");
+        try (TransferClient client = new TransferClient(address, "SEND", token, session.socket)) {
+            client.send(name, size, stream, percent -> runOnUiThread(() -> {
+                if (session.cancelled) return;
+                session.dialog.setMessage(percent < 100 ? name + " · " + percent + "%" : "Finishing transfer…");
+            }));
         }
-        runOnUiThread(() -> notifyUser("Sent: " + name));
     }
 
     private void chooseFileToSend() {
@@ -465,7 +516,7 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String host = prefs.getString("peer_host", "");
         String token = prefs.getString("link_token", "");
-        queueSend(() -> {
+        queueSend(session -> {
             String name;
             long size;
             try (android.database.Cursor cursor = getContentResolver().query(uri,
@@ -478,8 +529,9 @@ public class MainActivity extends Activity {
                 size = cursor.getLong(1);
             }
             try (InputStream stream = getContentResolver().openInputStream(uri)) {
-                sendToPhone(host, token, name, size, stream);
+                sendToPeer(session, host, token, name, size, stream);
             }
+            return name;
         });
     }
 
@@ -579,6 +631,10 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (activeSend != null) {
+            activeSend.cancel();
+            activeSend.dialog.dismiss();
+        }
         closeReceiver();
         sender.shutdownNow();
         super.onDestroy();

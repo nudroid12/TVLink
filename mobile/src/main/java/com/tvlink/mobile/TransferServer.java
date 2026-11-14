@@ -128,6 +128,7 @@ final class TransferServer implements AutoCloseable {
                 }
             }
             synchronized (folder.getAbsolutePath().intern()) {
+                if (closed) throw new IOException("Receiver closed");
                 if (target.exists() && (!overwrite || !target.isFile())) throw new IOException("Cannot save file");
                 if (!settings.getBoolean("modify_date", true) && target.isFile()) {
                     temporary.setLastModified(target.lastModified());

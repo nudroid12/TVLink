@@ -385,28 +385,93 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request != 10 || result != RESULT_OK || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
-        LinearLayout body = feature("Send");
-        TextView progress = info(body, "Preparing file…");
-        work(() -> {
-            String name;
-            long size;
-            try (android.database.Cursor cursor = getContentResolver().query(uri,
-                    new String[] {android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE},
-                    null, null, null)) {
-                if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0) || cursor.isNull(1)) {
-                    throw new IOException("File name or size unavailable. Choose a locally stored file.");
-                }
-                name = cursor.getString(0);
-                size = cursor.getLong(1);
+        SendSession session = beginSend();
+        if (session == null) return;
+        io.execute(() -> {
+            try (java.net.Socket socket = session.socket) {
+                sendSelectedFile(session, uri);
+            } catch (IOException | SecurityException error) {
+                finishSend(session, session.cancelled ? "Transfer cancelled" : "Could not send: " + error.getMessage());
             }
-            try (InputStream stream = getContentResolver().openInputStream(uri);
-                 TransferClient client = client("SEND")) {
-                if (stream == null) throw new IOException("Cannot read file");
-                client.send(name, size, stream, percent -> runOnUiThread(() ->
-                        progress.setText(name + " · " + percent + "%")));
-            }
-            runOnUiThread(() -> progress.setText("Sent: " + name));
         });
+    }
+
+    private void sendSelectedFile(SendSession session, android.net.Uri uri) throws IOException {
+        String name;
+        long size;
+        try (android.database.Cursor cursor = getContentResolver().query(uri,
+                new String[] {android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE},
+                null, null, null)) {
+            if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0) || cursor.isNull(1)) {
+                throw new IOException("File name or size unavailable. Choose a locally stored file.");
+            }
+            name = cursor.getString(0);
+            size = cursor.getLong(1);
+        }
+        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+        String token = settings.getString("link_token", "");
+        if (token.isEmpty()) throw new IOException("Connect file transfer first");
+        try (InputStream stream = getContentResolver().openInputStream(uri)) {
+            sendToPeer(session, settings.getString("remote_host", ""), token, name, size, stream);
+        }
+        finishSend(session, "Sent: " + name);
+    }
+
+    private static final class SendSession {
+        final java.net.Socket socket = new java.net.Socket();
+        final AlertDialog dialog;
+        volatile boolean cancelled;
+
+        SendSession(AlertDialog dialog) { this.dialog = dialog; }
+
+        void cancel() {
+            cancelled = true;
+            try { socket.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    private SendSession activeSend;
+
+    private SendSession beginSend() {
+        if (activeSend != null) {
+            notifyUser("A transfer is already running.");
+            return null;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Send file")
+                .setMessage("Preparing file…").setCancelable(false).setNegativeButton("Cancel", null).show();
+        SendSession session = new SendSession(dialog);
+        activeSend = session;
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+            session.dialog.setMessage("Cancelling transfer…");
+            session.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+            session.cancel();
+        });
+        return session;
+    }
+
+    private void finishSend(SendSession session, String outcome) {
+        runOnUiThread(() -> {
+            if (activeSend == session) activeSend = null;
+            session.dialog.dismiss();
+            if (!isFinishing() && !isDestroyed()) notifyUser(outcome);
+        });
+    }
+
+    private void sendToPeer(SendSession session, String host, String token, String name, long size, InputStream stream)
+            throws IOException {
+        if (stream == null) throw new IOException("Cannot read file");
+        if (session.cancelled) throw new IOException("Transfer cancelled");
+        runOnUiThread(() -> {
+            if (!session.cancelled) session.dialog.setMessage("Finding linked device…");
+        });
+        String address = LinkNetwork.resolve(host, token);
+        if (session.cancelled) throw new IOException("Transfer cancelled");
+        try (TransferClient client = new TransferClient(address, "SEND", token, session.socket)) {
+            client.send(name, size, stream, percent -> runOnUiThread(() -> {
+                if (session.cancelled) return;
+                session.dialog.setMessage(percent < 100 ? name + " · " + percent + "%" : "Finishing transfer…");
+            }));
+        }
     }
 
     private void showFiles() {
@@ -888,6 +953,10 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (activeSend != null) {
+            activeSend.cancel();
+            activeSend.dialog.dismiss();
+        }
         remoteIo.getQueue().clear();
         remoteIo.execute(this::closeSystemRemote);
         remoteIo.shutdown();
