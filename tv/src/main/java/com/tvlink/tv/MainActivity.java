@@ -333,11 +333,12 @@ public class MainActivity extends Activity {
         page.addView(line, params);
     }
 
-    private void info(LinearLayout body, String value) {
+    private TextView info(LinearLayout body, String value) {
         TextView text = new TextView(this);
         text.setPadding(0, dp(8), 0, dp(8));
         text.setText(value);
         body.addView(text);
+        return text;
     }
 
     private void closeReceiver() {
