@@ -21,6 +21,12 @@ final class AndroidTvRemote implements AutoCloseable {
 
     AndroidTvRemote(android.content.Context androidContext, File identityDirectory, String host, boolean pairing, String pin,
                     boolean legacyIdentity) throws Exception {
+        this(androidContext, identityDirectory, host, pairing, pin, legacyIdentity, message -> {});
+    }
+
+    AndroidTvRemote(android.content.Context androidContext, File identityDirectory, String host, boolean pairing,
+                    String pin, boolean legacyIdentity, java.util.function.Consumer<String> log) throws Exception {
+        log.accept("Loading Remote identity…");
         KeyStore legacy = KeyStore.getInstance("AndroidKeyStore");
         legacy.load(null);
         String legacyAlias = LEGACY_ALIAS;
@@ -53,7 +59,8 @@ final class AndroidTvRemote implements AutoCloseable {
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(new KeyManager[] {client}, new TrustManager[] {trust}, null);
         int port = pairing ? 6467 : 6466;
-        java.net.Socket raw = RemoteDiscovery.connect(androidContext, host, port);
+        java.net.Socket raw = RemoteDiscovery.connect(androidContext, host, port, log);
+        log.accept("TCP connected. Starting TLS handshake…");
         try {
             socket = (SSLSocket) context.getSocketFactory().createSocket(raw, host, port, true);
             socket.setSoTimeout(8000);

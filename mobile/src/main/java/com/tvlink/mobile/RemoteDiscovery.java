@@ -66,7 +66,7 @@ final class RemoteDiscovery {
         return devices;
     }
 
-    static Socket connect(Context context, String address, int port) throws IOException {
+    static Socket connect(Context context, String address, int port, java.util.function.Consumer<String> log) throws IOException {
         ConnectivityManager manager = context.getSystemService(ConnectivityManager.class);
         ArrayList<Network> routes = new ArrayList<>();
         if (manager != null) {
@@ -85,11 +85,14 @@ final class RemoteDiscovery {
         for (Network network : routes) {
             Socket socket = new Socket();
             try {
+                log.accept("Trying " + address + ":" + port + " via "
+                        + (network == null ? "default network" : "local Wi-Fi/Ethernet") + "…");
                 if (network != null) network.bindSocket(socket);
                 socket.connect(endpoint, routes.size() == 1 ? 5000 : 2500);
                 return socket;
             } catch (IOException error) {
                 failure = error;
+                log.accept("TCP attempt failed: " + error.getClass().getSimpleName());
                 try { socket.close(); } catch (IOException ignored) {}
             }
         }
