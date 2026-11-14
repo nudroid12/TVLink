@@ -341,8 +341,12 @@ public class MainActivity extends Activity {
                     }).show()));
             return;
         }
+        startPairing(body);
+    }
+
+    private void startPairing(LinearLayout body) {
         if (!startReceiver()) return;
-        info(body, "Open Pair in TVLink on your phone using the same Wi-Fi.");
+        info(body, "On your phone, tap Pair → Find TV. Keep this TV screen open.");
         pairing = new TextView(this);
         pairing.setText("Enter the code on your phone when Android TV shows it.");
         body.addView(pairing);
@@ -382,10 +386,10 @@ public class MainActivity extends Activity {
 
     private void showReceive() {
         LinearLayout body = feature("Receive Files");
-        if (!isLinked()) {
-            body.addView(button("Pair", this::showLinkStatus));
-        } else if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+        if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
             info(body, "Receive Transfers is disabled in Settings.");
+        } else if (!isLinked()) {
+            startPairing(body);
         } else {
             info(body, startReceiver() ? "Ready to receive from your linked phone." : "Could not start receiver.");
         }

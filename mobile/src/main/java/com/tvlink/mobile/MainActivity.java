@@ -591,31 +591,53 @@ public class MainActivity extends Activity {
         }
         EditText code = new EditText(this);
         code.setSingleLine(true);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Enter the code shown on TV").setView(code)
-                .setNegativeButton("Cancel", null)
+        code.setHint("Example: 58A2F9");
+        code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        code.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.AllCaps(),
+                new android.text.InputFilter.LengthFilter(6)});
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Enter the code shown on TV")
+                .setMessage("Enter all 6 characters shown by Android TV, including any letters A–F.")
+                .setView(code).setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", null).create();
         dialog.setOnDismissListener(ignored -> {
             pairing.close();
             remotePairing = false;
         });
         dialog.show();
+        code.requestFocus();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String value = code.getText().toString().trim();
             if (!value.matches("[0-9a-fA-F]{6}")) {
-                code.setError("Enter the six-character code");
+                dialog.setMessage("The code needs 6 characters. You entered " + value.length()
+                        + ". Include any letters A–F shown on the TV.");
+                code.requestFocus();
                 return;
             }
             dialog.setOnDismissListener(null);
             dialog.dismiss();
+            AlertDialog progress = new AlertDialog.Builder(this).setTitle("Linking TV")
+                    .setMessage("Checking the code on Android TV…").setCancelable(false).show();
             remoteIo.execute(() -> {
                 try (AndroidTvRemote connection = pairing) {
                     String pin = connection.finishPairing(value);
+                    runOnUiThread(() -> progress.setMessage("Saving the link for Remote and file transfers…"));
                     finishLink(host, pin, false);
                     showLinkComplete(paired);
                 } catch (Exception error) {
-                    runOnUiThread(() -> notifyUser("Pairing failed: " + error.getMessage()));
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        new AlertDialog.Builder(this).setTitle("Could not finish linking")
+                                .setMessage(error.getMessage())
+                                .setNegativeButton("Close", null)
+                                .setPositiveButton("Try again", (d, w) -> findPairingTv(paired)).show();
+                    });
                 } finally {
-                    runOnUiThread(() -> remotePairing = false);
+                    runOnUiThread(() -> {
+                        remotePairing = false;
+                        progress.dismiss();
+                    });
                 }
             });
         });
@@ -649,9 +671,15 @@ public class MainActivity extends Activity {
                 throw new RemoteUnavailable(error);
             }
             try (AndroidTvRemote connection = remote) {
+                // The system pairing prompt can still be giving focus back to TVLink.
+                Thread.sleep(600);
                 LinkKeys.send(connection, token);
                 if (!confirmLink(host, token)) {
-                    throw new IOException("Open Pair on the TV, then tap Pair on your phone again.");
+                    LinkKeys.send(connection, token);
+                    if (!confirmLink(host, token)) {
+                        throw new IOException("Android TV accepted the code, but TVLink could not save the link. "
+                                + "Keep Pair or Receive open on the TV and try again.");
+                    }
                 }
             }
         }
