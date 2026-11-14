@@ -20,6 +20,8 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final boolean TV = false;
 
+    private static final int FOCUS_BLUE = 0xff7fb1fe;
+
     private boolean showingHome;
     private Button homePair;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
@@ -47,7 +49,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(REMOTE_NAVY);
+        page.setBackgroundColor(0xff101624);
         setContentView(page);
         if (title == null) return page;
         TextView heading = new TextView(this);
@@ -63,31 +65,29 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? REMOTE_BLUE : REMOTE_OUTLINE);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff3a4b6b);
         return shape;
     }
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff31446d, true));
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff31446d, true));
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
 
     private Button button(String title, Runnable action) {
-        return styleButton(new Button(this), title, action, false);
-    }
-
-    private Button styleButton(Button button, String title, Runnable action, boolean primary) {
+        Button button = new Button(this);
         button.setText(title);
         button.setAllCaps(false);
-        button.setTextColor(primary ? REMOTE_NAVY : Color.WHITE);
+        button.setTextColor(Color.WHITE);
         button.setTextSize(TV ? 20 : 16);
         button.setGravity(Gravity.CENTER);
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? REMOTE_BLUE : 0xff31446d, true));
-        background.addState(new int[] {}, tile(primary ? REMOTE_BLUE : 0xff1b2740, false));
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {}, tile(0xff1b2740, false));
         button.setBackground(background);
         button.setOnClickListener(view -> action.run());
         return button;
@@ -296,7 +296,7 @@ public class MainActivity extends Activity {
 
         LinearLayout menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setGravity(Gravity.CENTER_VERTICAL);
+        menu.setGravity(Gravity.CENTER);
         ScrollView cards = new ScrollView(this);
         cards.setFillViewport(true);
         page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -306,16 +306,16 @@ public class MainActivity extends Activity {
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         for (int index = 0; index < titles.length; index++) {
             String title = titles[index];
-            boolean primary = index == 0;
-            Button item = styleButton(new Button(this), title, actions[index], primary);
+            Button item = button(title, actions[index]);
             item.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
             item.setCompoundDrawablePadding(dp(8));
             item.setPadding(dp(2), dp(10), dp(2), dp(10));
             item.setSingleLine(true);
             item.setTextSize(16);
-            if (primary) item.getCompoundDrawables()[1].setTint(REMOTE_NAVY);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(100));
-            if (index > 0) params.topMargin = dp(20);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(144));
+            params.setMarginStart(dp(20));
+            params.setMarginEnd(dp(20));
+            if (index > 0) params.topMargin = dp(24);
             menu.addView(item, params);
         }
     }
@@ -404,7 +404,7 @@ public class MainActivity extends Activity {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER_HORIZONTAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackground(tile(REMOTE_NAVY, false));
+        card.setBackground(tile(0xff1b2740, false));
         body.addView(card, new LinearLayout.LayoutParams(-1, -2));
 
         ImageView icon = new ImageView(this);
@@ -640,14 +640,19 @@ public class MainActivity extends Activity {
 
     private void showLocalFiles() {
         LinearLayout body = feature("My Files");
-        addFileToolbar(body, "Receive", this::receiveFiles, "Files on TV", () -> {
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
+        addFileToolbarAction(toolbar, "Files on TV", () -> {
             if (hasFilePairing()) showTvFiles();
             else pairSystemRemote(this::showTvFiles);
         });
-        addFileToolbar(body, newestFilesFirst ? "Sort: Newest" : "Sort: Name", () -> {
+        addFileToolbarAction(toolbar, newestFilesFirst ? "Sort: Newest" : "Sort: Name", () -> {
             newestFilesFirst = !newestFilesFirst;
             showLocalFiles();
-        }, "Refresh", this::showLocalFiles);
+        });
+        addFileToolbarAction(toolbar, "Refresh", this::showLocalFiles);
+        divider(body);
         File[] files = received().listFiles(file -> file.isFile() && !file.getName().startsWith("."));
         if (files == null || files.length == 0) {
             info(body, "No files received yet");
@@ -661,18 +666,14 @@ public class MainActivity extends Activity {
         for (File file : files) addLocalFileRow(body, file);
     }
 
-    private void addFileToolbar(LinearLayout body, String first, Runnable firstAction,
-                                String second, Runnable secondAction) {
-        LinearLayout row = new LinearLayout(this);
-        body.addView(row, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(48), 1);
-        left.setMarginEnd(dp(8));
-        Button firstButton = button(first, firstAction);
-        firstButton.setBackground(flatRowBackground());
-        row.addView(firstButton, left);
-        Button secondButton = button(second, secondAction);
-        secondButton.setBackground(flatRowBackground());
-        row.addView(secondButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+    private void addFileToolbarAction(LinearLayout toolbar, String title, Runnable action) {
+        Button item = button(title, action);
+        item.setBackground(flatRowBackground());
+        item.setTextSize(14);
+        item.setMinWidth(0);
+        item.setMinHeight(dp(48));
+        item.setPadding(dp(4), dp(6), dp(4), dp(6));
+        toolbar.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
     }
 
     private void addLocalFileRow(LinearLayout body, File file) {
@@ -968,13 +969,15 @@ public class MainActivity extends Activity {
     private StateListDrawable remoteBackground(int fill, int border, int radius) {
         StateListDrawable background = new StateListDrawable();
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(fill == REMOTE_BLUE ? 0xff87a0f6 : 0xff31446d);
+        pressed.setColor(fill == REMOTE_BLUE ? FOCUS_BLUE : 0xff31446d);
+        pressed.setStroke(dp(2), FOCUS_BLUE);
         pressed.setCornerRadius(dp(radius));
         GradientDrawable normal = new GradientDrawable();
         normal.setColor(fill);
         normal.setCornerRadius(dp(radius));
         if (border != 0) normal.setStroke(dp(1), border);
         background.addState(new int[] {android.R.attr.state_pressed}, pressed);
+        background.addState(new int[] {android.R.attr.state_focused}, pressed);
         background.addState(new int[] {}, normal);
         return background;
     }
