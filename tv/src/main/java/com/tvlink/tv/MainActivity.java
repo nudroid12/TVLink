@@ -134,25 +134,24 @@ public class MainActivity extends Activity {
         receivingScreen = false;
         stopPairingDisplay();
         LinearLayout page = screen();
-        page.setGravity(Gravity.CENTER);
-        int width = Math.min(dp(720), getResources().getDisplayMetrics().widthPixels - dp(48));
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(22), dp(16), dp(22), dp(22));
-        panel.setBackground(tile(0xff101624, false));
-        page.addView(panel, new LinearLayout.LayoutParams(width, -2));
+        page.setPadding(0, 0, 0, 0);
+        android.widget.FrameLayout layout = new android.widget.FrameLayout(this);
+        page.addView(layout, new LinearLayout.LayoutParams(-1, -1));
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        panel.addView(header);
+        android.widget.FrameLayout.LayoutParams headerSize =
+                new android.widget.FrameLayout.LayoutParams(-1, dp(44), Gravity.TOP);
+        headerSize.setMargins(dp(24), dp(24), dp(24), 0);
+        layout.addView(header, headerSize);
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.tvlink_wordmark);
         logo.setContentDescription("TVLink");
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         header.addView(logo, new LinearLayout.LayoutParams(dp(116), dp(40)));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button pair = button(TvSettings.device(this) + " · Pair", this::showReceive);
+        boolean paired = !getPreferences(MODE_PRIVATE).getString("transfer_token", "").isEmpty();
+        Button pair = button(paired ? "Paired" : "Pair", this::showReceive);
         pair.setSingleLine(true);
-        pair.setMaxWidth(Math.max(dp(100), width - dp(224)));
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(pair, new LinearLayout.LayoutParams(-2, dp(44)));
         Button gear = button("", this::showSettings);
@@ -162,12 +161,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams gearSize = new LinearLayout.LayoutParams(dp(44), dp(44));
         gearSize.setMarginStart(dp(8));
         header.addView(gear, gearSize);
-        divider(panel);
         LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        panel.addView(row);
-        int size = Math.min((width - dp(64)) / 3,
-                Math.min(dp(170), Math.max(dp(76), getResources().getDisplayMetrics().heightPixels - dp(156))));
+        layout.addView(row, new android.widget.FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int size = Math.min(dp(170), Math.min((metrics.widthPixels - dp(68)) / 3,
+                metrics.heightPixels - dp(152)));
         String[] titles = {"Receive", "Remote", "Files"};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
