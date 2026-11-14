@@ -169,8 +169,8 @@ public class MainActivity extends Activity {
         String[] titles = {"Receive", "Remote", "Files"};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
-        // The same flexible space goes at both edges and between cards.
-        row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        // Keep equal outer margins while bringing the cards closer together.
+        row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 2));
         for (int index = 0; index < titles.length; index++) {
             Button card = styleButton(new Button(this), titles[index], actions[index], index == 0);
             card.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
@@ -178,7 +178,8 @@ public class MainActivity extends Activity {
             if (index == 0) card.getCompoundDrawables()[1].setTint(0xff0c1c35);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
             row.addView(card, params);
-            row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            row.addView(new android.view.View(this),
+                    new LinearLayout.LayoutParams(0, 1, index == titles.length - 1 ? 2 : 1));
             if (index == 0) card.requestFocus();
         }
     }
@@ -201,9 +202,12 @@ public class MainActivity extends Activity {
         receivingScreen = false;
         stopPairingDisplay();
         LinearLayout page = screen();
-        Button back = button("←  Settings", this::home);
-        back.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        page.addView(back, new LinearLayout.LayoutParams(-1, dp(44)));
+        TextView title = new TextView(this);
+        title.setText("Settings");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(23);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(title, new LinearLayout.LayoutParams(-1, dp(44)));
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout rows = new LinearLayout(this);

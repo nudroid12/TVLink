@@ -87,14 +87,11 @@ public class MainActivity extends Activity {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(toolbar);
-        Button back = button("‹", this::home);
-        back.setContentDescription("Back");
-        toolbar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         TextView title = new TextView(this);
         title.setText("Settings");
         title.setTextSize(23);
-        title.setPadding(dp(12), 0, 0, 0);
-        toolbar.addView(title);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.addView(title, new LinearLayout.LayoutParams(-1, dp(44)));
         divider(page);
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -303,7 +300,7 @@ public class MainActivity extends Activity {
             item.setTextSize(16);
             if (primary) item.getCompoundDrawables()[1].setTint(0xff0c1c35);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(100));
-            if (index > 0) params.topMargin = dp(12);
+            if (index > 0) params.topMargin = dp(20);
             menu.addView(item, params);
         }
     }
