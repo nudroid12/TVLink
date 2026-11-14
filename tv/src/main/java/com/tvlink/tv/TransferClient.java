@@ -49,6 +49,14 @@ final class TransferClient implements AutoCloseable {
         if (!expected.equals(result)) throw new IOException("Unexpected response from device");
     }
 
+    String exchangeDeviceName(String name) throws IOException {
+        out.writeUTF(name);
+        out.flush();
+        expect("OK");
+        String reply = in.readUTF().trim();
+        return reply.length() <= 80 ? reply : reply.substring(0, 80);
+    }
+
     void confirm() throws IOException {
         expect("OK");
     }

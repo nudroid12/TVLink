@@ -13,6 +13,7 @@ final class TransferServer implements AutoCloseable {
     private final ServerSocket server;
     private final LinkNetwork discovery;
     private Socket active;
+    volatile String receiveProgress = "";
     private volatile boolean closed;
     private final android.content.SharedPreferences settings;
 
@@ -74,6 +75,19 @@ final class TransferServer implements AutoCloseable {
             String token = settings.getString("link_token", "");
             authorize(operation, token, in, out, binding);
             switch (operation) {
+                case "DEVICE":
+                    String name = in.readUTF().trim();
+                    if (!name.isEmpty() && name.length() <= 80) settings.edit().putString("peer_name", name).apply();
+                    out.writeUTF("OK");
+                    out.writeUTF(settings.getString("device_name", android.os.Build.MODEL));
+                    break;
+                case "UNPAIR":
+                    if (!settings.edit().remove("link_token").remove("peer_host").remove("peer_name")
+                            .remove("pending_file_host").remove("pending_file_token").commit()) {
+                        throw new IOException("Could not remove file pairing");
+                    }
+                    out.writeUTF("OK");
+                    break;
                 case "PING":
                     out.writeUTF("OK");
                     break;
@@ -107,6 +121,7 @@ final class TransferServer implements AutoCloseable {
     private void receive(DataInputStream in, DataOutputStream out) throws IOException {
         File target = file(folder, in.readUTF());
         long remaining = in.readLong();
+        long total = remaining;
         if (remaining < 0 || remaining > LIMIT || remaining > folder.getUsableSpace()) {
             throw new IOException("File size unavailable, too large or insufficient storage");
         }
@@ -115,6 +130,7 @@ final class TransferServer implements AutoCloseable {
             throw new IOException("A file with this name already exists");
         }
         File temporary = File.createTempFile(".upload-", ".part", folder);
+        receiveProgress = target.getName() + " · 0%";
         try {
             out.writeUTF("READY");
             out.flush();
@@ -125,6 +141,7 @@ final class TransferServer implements AutoCloseable {
                     if (count < 0) throw new EOFException("Transfer ended early");
                     data.write(buffer, 0, count);
                     remaining -= count;
+                    receiveProgress = target.getName() + " · " + ((total - remaining) * 100 / total) + "%";
                 }
             }
             synchronized (folder.getAbsolutePath().intern()) {
@@ -135,8 +152,13 @@ final class TransferServer implements AutoCloseable {
                 }
                 if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
             }
+            TransferHistory.add(settings, "Received: " + target.getName());
             out.writeUTF("OK");
+        } catch (IOException error) {
+            TransferHistory.add(settings, "Receive failed: " + target.getName() + " · " + error.getMessage());
+            throw error;
         } finally {
+            receiveProgress = "";
             temporary.delete();
         }
     }

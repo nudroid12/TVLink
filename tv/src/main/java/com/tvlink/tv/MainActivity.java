@@ -34,7 +34,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(0xff101624);
+        page.setBackgroundColor(0xff060f25);
         setContentView(page);
         return page;
     }
@@ -91,77 +91,34 @@ public class MainActivity extends Activity {
         return TvSettings.directory(this);
     }
 
-    private LinearLayout feature(String title) {
-        showingHome = false;
-        stopPairingDisplay();
-        LinearLayout page = screen();
+    private Button pairedHeader;
+
+    private String peerName() {
+        return getPreferences(MODE_PRIVATE).getString("peer_name", "Linked phone");
+    }
+
+    private void addHeader(LinearLayout page) {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(header, new LinearLayout.LayoutParams(-1, dp(38)));
+        page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.tvlink_wordmark);
         logo.setContentDescription("TVLink");
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         header.addView(logo, new LinearLayout.LayoutParams(dp(116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        TextView device = new TextView(this);
-        device.setText(TvSettings.device(this));
-        device.setTextColor(0xffb2c2dd);
-        header.addView(device);
-        divider(page);
-
-        ScrollView scroll = new ScrollView(this);
-        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(body);
-        TextView heading = new TextView(this);
-        heading.setText(title);
-        heading.setTextSize(24);
-        heading.setTextColor(Color.WHITE);
-        heading.setPadding(0, dp(8), 0, dp(4));
-        body.addView(heading);
-
-        if ("Pair".equals(title)) {
-            page.setFocusableInTouchMode(true);
-            page.requestFocus();
-            return body;
-        }
-
-        divider(page);
-        LinearLayout tabs = new LinearLayout(this);
-        page.addView(tabs);
-        boolean receiveSelected = "Receive Files".equals(title);
-        Button receive = styleButton(new Button(this), "Receive Files", this::showReceive, receiveSelected);
-        Button files = styleButton(new Button(this), "My Files", this::showFiles, !receiveSelected);
-        tabs.addView(receive, new LinearLayout.LayoutParams(0, dp(44), 1));
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(44), 1);
-        right.setMarginStart(dp(10));
-        tabs.addView(files, right);
-        (receiveSelected ? receive : files).requestFocus();
-        return body;
-    }
-
-    private void home() {
-        showingHome = true;
-        stopPairingDisplay();
-        LinearLayout page = screen();
-        page.setPadding(0, 0, 0, 0);
-        android.widget.FrameLayout layout = new android.widget.FrameLayout(this);
-        page.addView(layout, new LinearLayout.LayoutParams(-1, -1));
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        android.widget.FrameLayout.LayoutParams headerSize =
-                new android.widget.FrameLayout.LayoutParams(-1, dp(44), Gravity.TOP);
-        headerSize.setMargins(dp(24), dp(24), dp(24), 0);
-        layout.addView(header, headerSize);
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.tvlink_wordmark);
-        logo.setContentDescription("TVLink");
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        header.addView(logo, new LinearLayout.LayoutParams(dp(116), dp(40)));
-        header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button pair = button(isLinked() ? "Paired" : "Pair", this::showLinkStatus);
+        Button pair = button(isLinked() ? peerName() : "Pair", this::showLinkStatus);
+        pairedHeader = pair;
+        Runnable refreshHeader = new Runnable() {
+            public void run() {
+                if (!pair.isAttachedToWindow() || pairedHeader != pair) return;
+                String currentName = isLinked() ? peerName() : "Pair";
+                if (!currentName.contentEquals(pair.getText())) pair.setText(currentName);
+                pair.postDelayed(this, 500);
+            }
+        };
+        pair.post(refreshHeader);
+        pair.setMaxWidth(dp(280));
         pair.setSingleLine(true);
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(pair, new LinearLayout.LayoutParams(-2, dp(44)));
@@ -172,22 +129,73 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams gearSize = new LinearLayout.LayoutParams(dp(44), dp(44));
         gearSize.setMarginStart(dp(8));
         header.addView(gear, gearSize);
+        divider(page);
+    }
+
+    private LinearLayout feature(String title) {
+        showingHome = false;
+        stopPairingDisplay();
+        LinearLayout page = screen();
+        addHeader(page);
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
+        titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextSize(24);
+        heading.setTextColor(Color.WHITE);
+        heading.setPadding(dp(16), 0, 0, 0);
+        titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        if ("My Files".equals(title)) {
+            titleRow.addView(button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
+                newestFirst = !newestFirst;
+                showFiles();
+            }), new LinearLayout.LayoutParams(dp(150), dp(42)));
+        }
+        ScrollView scroll = new ScrollView(this);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(body);
+        return body;
+    }
+
+    private void home() {
+        showingHome = true;
+        stopPairingDisplay();
+        LinearLayout page = screen();
+        addHeader(page);
         LinearLayout row = new LinearLayout(this);
-        layout.addView(row, new android.widget.FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        row.setGravity(Gravity.CENTER);
+        page.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
-        int size = Math.min(dp(170), Math.min((metrics.widthPixels - dp(96)) / 3,
-                metrics.heightPixels - dp(152)));
-        String[] titles = {"Receive", "Remote", "Files"};
+        int width = Math.round((metrics.widthPixels - dp(48)) * .23f);
+        int height = Math.min(Math.round(metrics.heightPixels * .62f), metrics.heightPixels - dp(126));
+        String[] titles = {"Send / Receive", "Remote", "Files"};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
         // Keep equal outer margins while bringing the cards closer together.
         row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 2));
         for (int index = 0; index < titles.length; index++) {
-            Button card = styleButton(new Button(this), titles[index], actions[index], index == 0);
-            card.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
-            card.setPadding(0, size / 4, 0, size / 7);
-            if (index == 0) card.getCompoundDrawables()[1].setTint(0xff0c1c35);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+            Button card = button(titles[index], actions[index]);
+            StateListDrawable focusBackground = new StateListDrawable();
+            focusBackground.addState(new int[] {android.R.attr.state_focused}, tile(0xff1dbaf1, true));
+            focusBackground.addState(new int[] {}, tile(0xff1b2740, false));
+            card.setBackground(focusBackground);
+            card.setTextColor(new android.content.res.ColorStateList(
+                    new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
+                    new int[] {0xff0c1c35, Color.WHITE}));
+            android.graphics.drawable.Drawable icon = getDrawable(icons[index]).mutate();
+            int iconSize = Math.min(dp(70), width / 2);
+            icon.setBounds(0, 0, iconSize, iconSize);
+            card.setCompoundDrawables(null, icon, null, null);
+            card.setPadding(dp(4), height / 4, dp(4), height / 7);
+            card.setTextSize(22);
+            card.getCompoundDrawables()[1].mutate().setTintList(new android.content.res.ColorStateList(
+                    new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
+                    new int[] {0xff0c1c35, Color.WHITE}));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
             row.addView(card, params);
             row.addView(new android.view.View(this),
                     new LinearLayout.LayoutParams(0, 1, index == titles.length - 1 ? 2 : 1));
@@ -198,7 +206,7 @@ public class MainActivity extends Activity {
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
         info(body, "Use Remote in TVLink on your phone to control this TV.");
-        if (!isLinked()) body.addView(button("Pair", this::showLinkStatus));
+        showDevice(body);
     }
 
     private String appVersion() {
@@ -210,20 +218,7 @@ public class MainActivity extends Activity {
     }
 
     private void showSettings() {
-        showingHome = false;
-        stopPairingDisplay();
-        LinearLayout page = screen();
-        TextView title = new TextView(this);
-        title.setText("Settings");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(23);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(title, new LinearLayout.LayoutParams(-1, dp(44)));
-        ScrollView scroll = new ScrollView(this);
-        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout rows = new LinearLayout(this);
-        rows.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(rows);
+        LinearLayout rows = feature("Settings");
         setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", TvSettings.device(this), () -> editSetting("Device Name", "device_name", TvSettings.device(this)));
         setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
@@ -335,17 +330,42 @@ public class MainActivity extends Activity {
 
     private void showLinkStatus() {
         LinearLayout body = feature("Pair");
-        if (isLinked()) {
-            info(body, "Phone linked for Remote and file transfers.");
-            body.addView(button("Forget link", () -> new AlertDialog.Builder(this).setTitle("Forget link?")
-                    .setMessage("To revoke system remote access as well, remove TVLink in Android TV's remote settings.")
-                    .setNegativeButton("Cancel", null).setPositiveButton("Forget", (dialog, which) -> {
-                        getPreferences(MODE_PRIVATE).edit().remove("link_token").remove("peer_host").apply();
-                        showLinkStatus();
-                    }).show()));
+        if (isLinked()) showDevice(body);
+        else {
+            info(body, "Device · No phone linked");
+            startPairing(body);
+        }
+    }
+
+    private void showDevice(LinearLayout body) {
+        info(body, "Device");
+        if (!isLinked()) {
+            info(body, "No phone linked for file transfer.");
+            body.addView(button("Pair", this::showLinkStatus));
             return;
         }
-        startPairing(body);
+        info(body, peerName() + " · Paired for file transfer");
+        body.addView(button("Unpair", () -> new AlertDialog.Builder(this).setTitle("Unpair " + peerName() + "?")
+                .setMessage("This removes the file link. Android TV Remote access can be removed in system settings.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show()));
+    }
+
+    private void unpairPhone() {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("peer_host", "");
+        String token = prefs.getString("link_token", "");
+        if (activeSend != null) activeSend.cancel();
+        closeReceiver();
+        prefs.edit().remove("link_token").remove("peer_host").remove("peer_name").apply();
+        showLinkStatus();
+        sender.execute(() -> {
+            try (TransferClient client = new TransferClient(host, "UNPAIR", token)) {
+                client.confirm();
+            } catch (IOException error) {
+                runOnUiThread(() -> notifyUser("Unpaired here. Phone was unavailable."));
+            }
+        });
     }
 
     private void startPairing(LinearLayout body) {
@@ -392,13 +412,19 @@ public class MainActivity extends Activity {
         refresh.removeCallbacks(updatePairing);
         dismissFileApproval();
         if (receiver == null || pairing == null) return;
-        boolean remotePaired = receiver.pairingStatus().startsWith("Phone reports Remote paired");
+        boolean remotePaired = receiver.pairingStatus().startsWith("Phone reports Remote pairing saved");
         receiver.enableLinking(false);
         if (!remotePaired) pairing.setText("Pairing timed out. Press Back and reopen Pair to try again.");
     };
 
     private void showReceive() {
-        LinearLayout body = feature("Receive Files");
+        LinearLayout body = feature("Send / Receive");
+        body.addView(button("Send file", this::chooseFileToSend));
+        TextView transfers = new TextView(this);
+        transfers.setTextColor(Color.WHITE);
+        transfers.setTextSize(17);
+        body.addView(transfers);
+        renderTransfers(transfers);
         if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
             info(body, "Receive Transfers is disabled in Settings.");
         } else if (!isLinked()) {
@@ -471,7 +497,33 @@ public class MainActivity extends Activity {
         return session;
     }
 
+    private void renderTransfers(TextView view) {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        Runnable refreshTransfers = new Runnable() {
+            public void run() {
+                if (!view.isAttachedToWindow()) return;
+                String incoming = receiver == null ? "" : receiver.receiveProgress;
+                String sending = activeSend != null ? "\nSending · see transfer dialog" : "";
+                StringBuilder text = new StringBuilder(incoming.isEmpty() ? "No active incoming transfer"
+                        : "Receiving: " + incoming).append(sending).append("\n\nTransfer history");
+                org.json.JSONArray latest = TransferHistory.read(prefs);
+                if (latest.length() == 0) text.append("\nNo transfers yet");
+                for (int i = 0; i < latest.length(); i++) {
+                    org.json.JSONObject item = latest.optJSONObject(i);
+                    if (item != null) text.append("\n").append(item.optString("outcome")).append("  ·  ")
+                            .append(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,
+                                    java.text.DateFormat.SHORT).format(new java.util.Date(item.optLong("time"))));
+                }
+                String value = text.toString();
+                if (!value.contentEquals(view.getText())) view.setText(value);
+                view.postDelayed(this, 500);
+            }
+        };
+        view.post(refreshTransfers);
+    }
+
     private void finishSend(SendSession session, String outcome) {
+        TransferHistory.add(getPreferences(MODE_PRIVATE), outcome);
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
@@ -552,17 +604,78 @@ public class MainActivity extends Activity {
         });
     }
 
+    private boolean newestFirst = true;
+
     private void showFiles() {
         LinearLayout body = feature("My Files");
-        body.addView(button("Choose file to send", this::chooseFileToSend));
-        body.addView(button("Refresh", this::showFiles));
         File[] files = received().listFiles(f -> f.isFile() && !f.getName().startsWith("."));
         if (files == null || files.length == 0) {
             info(body, "No files received yet");
             return;
         }
-        java.util.Arrays.sort(files, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
-        for (File file : files) body.addView(button(file.getName(), () -> fileActions(file)));
+        java.util.Comparator<File> byName = java.util.Comparator.comparing(File::getName,
+                String.CASE_INSENSITIVE_ORDER);
+        java.util.Arrays.sort(files, newestFirst
+                ? java.util.Comparator.comparingLong(File::lastModified).reversed().thenComparing(byName)
+                : byName);
+        for (File file : files) addFileRow(body, file);
+        body.getChildAt(0).requestFocus();
+    }
+
+    private void addFileRow(LinearLayout body, File file) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), 0, dp(16), 0);
+        row.setFocusable(true);
+        row.setOnClickListener(view -> fileActions(file));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff07336c, true));
+        background.addState(new int[] {}, tile(0xff101f3c, false));
+        row.setBackground(background);
+        LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, dp(62));
+        rowSize.bottomMargin = dp(4);
+        body.addView(row, rowSize);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_document);
+        String filename = file.getName();
+        if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
+            String path = file.getAbsolutePath();
+            sender.execute(() -> {
+                try {
+                    android.content.pm.PackageInfo archive = getPackageManager().getPackageArchiveInfo(path, 0);
+                    if (archive != null && archive.applicationInfo != null) {
+                        archive.applicationInfo.sourceDir = path;
+                        archive.applicationInfo.publicSourceDir = path;
+                        android.graphics.drawable.Drawable appIcon = archive.applicationInfo.loadIcon(getPackageManager());
+                        runOnUiThread(() -> { if (icon.isAttachedToWindow()) icon.setImageDrawable(appIcon); });
+                    }
+                } catch (RuntimeException error) {
+                    android.util.Log.d("TVLink", "Could not load APK icon", error);
+                }
+            });
+        }
+        row.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(16), 0, dp(12), 0);
+        row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView name = new TextView(this);
+        name.setText(filename);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setTextColor(0xff20c7f3);
+        name.setTextSize(19);
+        labels.addView(name);
+        TextView size = new TextView(this);
+        size.setText(android.text.format.Formatter.formatShortFileSize(this, file.length()));
+        size.setTextColor(Color.WHITE);
+        labels.addView(size);
+        TextView date = new TextView(this);
+        date.setText(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,
+                java.text.DateFormat.SHORT).format(new java.util.Date(file.lastModified())));
+        date.setTextColor(Color.WHITE);
+        date.setTextSize(15);
+        row.addView(date);
     }
 
     private void fileActions(File file) {

@@ -217,6 +217,8 @@ public class MainActivity extends Activity {
             info(body, receiver == null ? "Could not start receiver." : "Ready to receive from your linked TV.");
         }
         body.addView(button("Received files", this::showLocalFiles));
+        TextView transfers = info(body, "");
+        renderTransfers(transfers);
     }
 
     private void home() {
@@ -232,7 +234,9 @@ public class MainActivity extends Activity {
         wordmark.setContentDescription("TVLink");
         header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        Button pair = button(hasRemotePairing() ? "Paired" : "Pair", this::pairMenu);
+        Button pair = button(hasRemotePairing() ? linkedTvName() : "Pair", this::pairMenu);
+        pair.setSingleLine(true);
+        pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
         Button settings = button("", this::showSettings);
         settings.setContentDescription("Settings");
@@ -346,13 +350,47 @@ public class MainActivity extends Activity {
             pairSystemRemote(this::home, false);
             return;
         }
-        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Linked TV")
-                .setMessage(hasFilePairing() ? "Remote and file transfers connected."
-                        : "Remote paired · File transfer not connected")
+        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Device")
+                .setMessage(linkedTvName() + "\n" + (hasFilePairing() ? "Remote and file transfers paired."
+                        : "Remote paired · File transfer not connected"))
                 .setNegativeButton("Close", null)
+                .setNeutralButton("Unpair", (dialog, choice) -> confirmUnpair())
                 .setPositiveButton(hasFilePairing() ? "Change TV" : "Connect file transfer",
                         (dialog, choice) -> pairSystemRemote(this::home, !hasFilePairing()))
                 .show();
+    }
+
+    private String linkedTvName() {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        return prefs.getString("remote_name", prefs.getString("peer_name", "Linked TV"));
+    }
+
+    private void confirmUnpair() {
+        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Unpair " + linkedTvName() + "?")
+                .setMessage("This removes the saved Remote and file link from this phone.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Unpair", (d, w) -> unpairTv()).show();
+    }
+
+    private void unpairTv() {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("remote_host", "");
+        String token = prefs.getString("link_token", "");
+        if (activeSend != null) activeSend.cancel();
+        closeReceiver();
+        prefs.edit().remove("remote_host").remove("remote_pin").remove("remote_legacy_identity")
+                .remove("remote_name").remove("peer_name").remove("link_token").remove("pending_host")
+                .remove("pending_pin").remove("pending_legacy_identity").remove("pending_token")
+                .remove("pending_file_host").remove("pending_file_token").apply();
+        home();
+        remoteIo.execute(this::closeSystemRemote);
+        if (!token.isEmpty()) io.execute(() -> {
+            try (TransferClient client = new TransferClient(host, "UNPAIR", token)) {
+                client.confirm();
+            } catch (IOException error) {
+                runOnUiThread(() -> notifyUser("Unpaired here. TV was unavailable."));
+            }
+        });
     }
 
     private void openSend() {
@@ -369,6 +407,7 @@ public class MainActivity extends Activity {
         LinearLayout body = feature("Send");
         body.addView(button("Choose file to send", this::chooseFileToSend));
         body.addView(button("Received files", this::showLocalFiles));
+        renderTransfers(info(body, ""));
     }
 
     private void chooseFileToSend() {
@@ -474,7 +513,33 @@ public class MainActivity extends Activity {
         return session;
     }
 
+    private void renderTransfers(TextView view) {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        Runnable refreshTransfers = new Runnable() {
+            public void run() {
+                if (!view.isAttachedToWindow()) return;
+                String incoming = receiver == null ? "" : receiver.receiveProgress;
+                String sending = activeSend != null ? "\nSending · see transfer dialog" : "";
+                StringBuilder text = new StringBuilder(incoming.isEmpty() ? "No active incoming transfer"
+                        : "Receiving: " + incoming).append(sending).append("\n\nTransfer history");
+                org.json.JSONArray latest = TransferHistory.read(prefs);
+                if (latest.length() == 0) text.append("\nNo transfers yet");
+                for (int i = 0; i < latest.length(); i++) {
+                    org.json.JSONObject item = latest.optJSONObject(i);
+                    if (item != null) text.append("\n").append(item.optString("outcome")).append("  ·  ")
+                            .append(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,
+                                    java.text.DateFormat.SHORT).format(new java.util.Date(item.optLong("time"))));
+                }
+                String value = text.toString();
+                if (!value.contentEquals(view.getText())) view.setText(value);
+                view.postDelayed(this, 500);
+            }
+        };
+        view.post(refreshTransfers);
+    }
+
     private void finishSend(SendSession session, String outcome) {
+        TransferHistory.add(getPreferences(MODE_PRIVATE), outcome);
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
@@ -717,6 +782,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams reconnectSize = new LinearLayout.LayoutParams(dp(144), dp(44));
         reconnectSize.gravity = Gravity.CENTER;
         page.addView(reconnect, reconnectSize);
+        status.setOnClickListener(view -> pairMenu());
+        status.setContentDescription("Connection status. Tap for paired device options.");
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -861,12 +928,13 @@ public class MainActivity extends Activity {
                                 .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired, linkFiles))
                                 .show();
                     } else if (discovered.size() == 1) {
-                        connectForPairing(discovered.keySet().iterator().next(), paired, linkFiles);
+                        java.util.Map.Entry<String, String> device = discovered.entrySet().iterator().next();
+                        connectForPairing(device.getKey(), device.getValue(), paired, linkFiles);
                     } else {
                         String[] hosts = discovered.keySet().toArray(new String[0]);
                         String[] names = discovered.values().toArray(new String[0]);
                         new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Choose your TV")
-                                .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired, linkFiles))
+                                .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], names[choice], paired, linkFiles))
                                 .setNegativeButton("Cancel", null).show();
                     }
                 });
@@ -881,7 +949,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void connectForPairing(String host, Runnable paired, boolean linkFiles) {
+    private void connectForPairing(String host, String name, Runnable paired, boolean linkFiles) {
         if (remotePairing || isFinishing() || isDestroyed()) return;
         remotePairing = true;
         PairingLog connecting = pairingProgress("Connecting to TV…");
@@ -897,7 +965,7 @@ public class MainActivity extends Activity {
                         boolean pending = !prefs.getString("pending_pin", "").isEmpty();
                         boolean legacy = prefs.getBoolean(pending ? "pending_legacy_identity" : "remote_legacy_identity", true);
                         if (linkFiles) {
-                            saveRemotePairing(host, previousPin, legacy);
+                            saveRemotePairing(host, previousPin, legacy, name);
                             connecting.step("Using saved Remote pairing. Connecting file transfer…");
                             finishLink(host, connecting);
                         } else {
@@ -907,7 +975,7 @@ public class MainActivity extends Activity {
                             } catch (Exception error) {
                                 throw new RemoteUnavailable(error);
                             }
-                            saveRemotePairing(host, previousPin, legacy);
+                            saveRemotePairing(host, previousPin, legacy, name);
                         }
                         reportPairingStatus(host, "PAIRED");
                         runOnUiThread(connecting::dismiss);
@@ -924,7 +992,7 @@ public class MainActivity extends Activity {
                 reportPairingStatus(host, "CODE");
                 runOnUiThread(() -> {
                     connecting.dismiss();
-                    enterRemoteCode(pending, host, paired, linkFiles);
+                    enterRemoteCode(pending, host, name, paired, linkFiles);
                 });
             } catch (Exception error) {
                 if (pairing != null) pairing.close();
@@ -941,7 +1009,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void enterRemoteCode(AndroidTvRemote pairing, String host, Runnable paired, boolean linkFiles) {
+    private void enterRemoteCode(AndroidTvRemote pairing, String host, String name, Runnable paired, boolean linkFiles) {
         if (isFinishing() || isDestroyed()) {
             pairing.close();
             return;
@@ -1024,7 +1092,7 @@ public class MainActivity extends Activity {
                 try (AndroidTvRemote connection = pairing) {
                     reportPairingStatus(host, "VERIFYING");
                     String pin = connection.finishPairing(value);
-                    saveRemotePairing(host, pin, false);
+                    saveRemotePairing(host, pin, false, name);
                     remoteSaved = true;
                     reportPairingStatus(host, "PAIRED");
                     if (linkFiles) {
@@ -1126,12 +1194,12 @@ public class MainActivity extends Activity {
         LinkNetwork.sendPairingStatus(host, status);
     }
 
-    private void saveRemotePairing(String host, String pin, boolean legacyIdentity) throws IOException {
+    private void saveRemotePairing(String host, String pin, boolean legacyIdentity, String name) throws IOException {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         android.content.SharedPreferences.Editor edit = prefs.edit()
-                .putString("remote_host", host).putString("remote_pin", pin)
+                .putString("remote_host", host).putString("remote_pin", pin).putString("remote_name", name)
                 .putBoolean("remote_legacy_identity", legacyIdentity);
-        if (!host.equals(prefs.getString("remote_host", ""))) edit.remove("link_token");
+        if (!host.equals(prefs.getString("remote_host", ""))) edit.remove("link_token").remove("peer_name");
         if (!edit.commit()) throw new IOException("Could not save Remote pairing on this phone");
         closeSystemRemote();
     }
@@ -1166,6 +1234,19 @@ public class MainActivity extends Activity {
                 .remove("pending_file_host").remove("pending_file_token").remove("pending_host")
                 .remove("pending_pin").remove("pending_legacy_identity").remove("pending_token").commit()) {
             throw new IOException("Could not save the link on this phone");
+        }
+        syncDeviceName(host, token);
+    }
+
+    private void syncDeviceName(String host, String token) {
+        try (TransferClient client = new TransferClient(host, "DEVICE", token)) {
+            String name = client.exchangeDeviceName(LocalSettings.device(this));
+            android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+            if (!name.isEmpty() && token.equals(prefs.getString("link_token", ""))) {
+                prefs.edit().putString("peer_name", name).putString("remote_name", name).apply();
+            }
+        } catch (IOException error) {
+            android.util.Log.d("TVLink", "Could not synchronize paired device name", error);
         }
     }
 
@@ -1243,9 +1324,9 @@ public class MainActivity extends Activity {
                 progress.dismiss();
                 if (isFinishing() || isDestroyed() || remoteStatus != status) return;
                 if (result == null) {
-                    status.setText("Remote connected");
+                    status.setText(linkedTvName() + " · Connected");
                 } else {
-                    status.setText("Remote disconnected. Tap Reconnect.");
+                    status.setText(linkedTvName() + " · Disconnected");
                     progress.failed("Remote disconnected", result, () -> connectRemoteScreen(status));
                 }
             });
@@ -1318,6 +1399,15 @@ public class MainActivity extends Activity {
         super.onStart();
         started = true;
         startReceiver();
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String token = prefs.getString("link_token", "");
+        String host = prefs.getString("remote_host", "");
+        if (!token.isEmpty() && prefs.getString("peer_name", "").isEmpty()) {
+            io.execute(() -> {
+                syncDeviceName(host, token);
+                runOnUiThread(() -> { if (showingHome && !isDestroyed()) home(); });
+            });
+        }
     }
 
     @Override protected void onDestroy() {
