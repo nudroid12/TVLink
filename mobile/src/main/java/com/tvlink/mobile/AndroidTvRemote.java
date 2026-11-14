@@ -141,7 +141,12 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     void start(java.util.function.Consumer<String> log) throws IOException {
-        int features = 3;
+        final int ping = 1;
+        final int keys = 1 << 1;
+        final int power = 1 << 5;
+        final int volume = 1 << 6;
+        int features = ping | keys | power | volume;
+        boolean configured = false;
         int frames = 0;
         boolean activated = false;
         long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
@@ -157,23 +162,31 @@ final class AndroidTvRemote implements AutoCloseable {
                         : "TV did not finish Remote negotiation (5s limit)", timeout);
             }
             if (message.containsKey(1)) {
-                log.accept("TV sent Remote configuration.");
                 Map<Integer, Object> config = parse((byte[]) message.get(1));
-                features &= (Integer) config.getOrDefault(1, 0);
-                if ((features & 2) == 0) throw new IOException("TV does not offer remote keys");
+                int offered = (Integer) config.getOrDefault(1, 0);
+                features &= offered;
+                log.accept("TV capabilities: " + offered + "; requested: " + features + ".");
+                if ((features & keys) == 0) throw new IOException("TV does not offer remote keys");
                 byte[] info = concat(number(3, 1), string(4, "1"), string(5, "atvremote"), string(6, "1.0.0"));
                 write(field(1, concat(number(1, features), field(2, info))));
+                configured = true;
             }
-            if (message.containsKey(2)) {
+            if (message.containsKey(2) && configured) {
                 write(field(2, number(1, features)));
                 activated = true;
                 log.accept("Activation sent. Waiting for TV ready (5s negotiation limit)…");
             }
             if (message.containsKey(3)) throw new IOException("TV rejected remote connection");
             pong(message);
+            if (message.containsKey(8)) log.accept("TV keepalive received and answered.");
             if (message.containsKey(40)) {
                 startKeepalive();
                 log.accept("TV confirmed the Remote session.");
+                return;
+            }
+            if (activated && (message.containsKey(50) || message.containsKey(20))) {
+                startKeepalive();
+                log.accept("TV sent Remote state after activation. Opening controls.");
                 return;
             }
         }
