@@ -21,10 +21,20 @@ public class MainActivity extends Activity {
     private static final boolean TV = false;
 
     private boolean showingHome;
+    private Button homePair;
+    private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
+            (prefs, key) -> {
+                if ("peer_name".equals(key) || "remote_name".equals(key)) {
+                    if (showingHome && homePair != null && hasRemotePairing()) {
+                        homePair.setText(linkedTvName());
+                    }
+                }
+            };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
+        getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
     }
 
@@ -235,9 +245,17 @@ public class MainActivity extends Activity {
         header.addView(wordmark, new LinearLayout.LayoutParams(dp(TV ? 154 : 116), -1));
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
         Button pair = button(hasRemotePairing() ? linkedTvName() : "Pair", this::pairMenu);
+        homePair = pair;
         pair.setSingleLine(true);
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
+        if (hasRemotePairing()) {
+            pair.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_link, 0, 0, 0);
+            pair.setCompoundDrawablePadding(dp(6));
+            pair.setPadding(dp(8), 0, dp(8), 0);
+            header.addView(pair, new LinearLayout.LayoutParams(0, dp(48), 3));
+        } else {
+            header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
+        }
         Button settings = button("", this::showSettings);
         settings.setContentDescription("Settings");
         settings.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_settings, 0, 0, 0);
@@ -362,7 +380,7 @@ public class MainActivity extends Activity {
 
     private String linkedTvName() {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        return prefs.getString("remote_name", prefs.getString("peer_name", "Linked TV"));
+        return prefs.getString("peer_name", prefs.getString("remote_name", "Linked TV"));
     }
 
     private void confirmUnpair() {
@@ -565,26 +583,100 @@ public class MainActivity extends Activity {
     }
 
     private void showFiles() {
-        LinearLayout body = feature("Files");
-        body.addView(button("Receive Files", this::receiveFiles));
-        body.addView(button("Received files", this::showLocalFiles));
-        body.addView(button("Files on TV", () -> {
-            if (hasFilePairing()) showTvFiles();
-            else pairSystemRemote(this::showTvFiles);
-        }));
+        showLocalFiles();
     }
 
+    private boolean newestFilesFirst = true;
+
     private void showLocalFiles() {
-        LinearLayout body = feature("Received Files");
-        if (hasFilePairing()) body.addView(button("Choose file to send", this::chooseFileToSend));
-        body.addView(button("Refresh", this::showLocalFiles));
+        LinearLayout body = feature("My Files");
+        addFileToolbar(body, "Receive", this::receiveFiles, "Files on TV", () -> {
+            if (hasFilePairing()) showTvFiles();
+            else pairSystemRemote(this::showTvFiles);
+        });
+        addFileToolbar(body, newestFilesFirst ? "Sort: Newest" : "Sort: Name", () -> {
+            newestFilesFirst = !newestFilesFirst;
+            showLocalFiles();
+        }, "Refresh", this::showLocalFiles);
         File[] files = received().listFiles(file -> file.isFile() && !file.getName().startsWith("."));
         if (files == null || files.length == 0) {
             info(body, "No files received yet");
             return;
         }
-        java.util.Arrays.sort(files, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
-        for (File file : files) body.addView(button(file.getName(), () -> fileActions(file)));
+        java.util.Comparator<File> byName = java.util.Comparator.comparing(
+                File::getName, String.CASE_INSENSITIVE_ORDER);
+        java.util.Arrays.sort(files, newestFilesFirst
+                ? java.util.Comparator.comparingLong(File::lastModified).reversed().thenComparing(byName)
+                : byName);
+        for (File file : files) addLocalFileRow(body, file);
+    }
+
+    private void addFileToolbar(LinearLayout body, String first, Runnable firstAction,
+                                String second, Runnable secondAction) {
+        LinearLayout row = new LinearLayout(this);
+        body.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(48), 1);
+        left.setMarginEnd(dp(8));
+        row.addView(button(first, firstAction), left);
+        row.addView(button(second, secondAction), new LinearLayout.LayoutParams(0, dp(48), 1));
+    }
+
+    private void addLocalFileRow(LinearLayout body, File file) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        row.setMinimumHeight(dp(64));
+        row.setFocusable(true);
+        row.setOnClickListener(view -> fileActions(file));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {}, tile(0xff1b2740, false));
+        row.setBackground(background);
+        LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, -2);
+        rowSize.topMargin = dp(6);
+        body.addView(row, rowSize);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_document);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12), 0, 0, 0);
+        row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView name = new TextView(this);
+        name.setText(file.getName());
+        name.setTextSize(16);
+        name.setTextColor(0xff9ac2ff);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(name);
+
+        TextView details = new TextView(this);
+        String size = android.text.format.Formatter.formatShortFileSize(this, file.length());
+        String date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,
+                java.text.DateFormat.SHORT).format(new java.util.Date(file.lastModified()));
+        details.setText(size + " · " + date);
+        details.setTextColor(Color.WHITE);
+        labels.addView(details);
+
+        if (file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
+            io.execute(() -> {
+                try {
+                    String path = file.getAbsolutePath();
+                    android.content.pm.PackageInfo archive = getPackageManager().getPackageArchiveInfo(path, 0);
+                    if (archive != null && archive.applicationInfo != null) {
+                        archive.applicationInfo.sourceDir = path;
+                        archive.applicationInfo.publicSourceDir = path;
+                        android.graphics.drawable.Drawable appIcon = archive.applicationInfo.loadIcon(getPackageManager());
+                        runOnUiThread(() -> { if (icon.isAttachedToWindow()) icon.setImageDrawable(appIcon); });
+                    }
+                } catch (RuntimeException error) {
+                    android.util.Log.d("TVLink", "Could not load APK icon", error);
+                }
+            });
+        }
     }
 
     private void fileActions(File file) {
@@ -1402,15 +1494,13 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String token = prefs.getString("link_token", "");
         String host = prefs.getString("remote_host", "");
-        if (!token.isEmpty() && prefs.getString("peer_name", "").isEmpty()) {
-            io.execute(() -> {
-                syncDeviceName(host, token);
-                runOnUiThread(() -> { if (showingHome && !isDestroyed()) home(); });
-            });
+        if (!host.isEmpty() && !token.isEmpty()) {
+            io.execute(() -> syncDeviceName(host, token));
         }
     }
 
     @Override protected void onDestroy() {
+        getPreferences(MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(deviceListener);
         if (activeSend != null) {
             activeSend.cancel();
             activeSend.dialog.dismiss();

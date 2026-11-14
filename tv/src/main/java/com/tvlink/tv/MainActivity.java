@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
+        getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
     }
 
@@ -35,6 +36,8 @@ public class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
         page.setBackgroundColor(0xff060f25);
+        deviceCardName = null;
+        deviceCard = null;
         setContentView(page);
         return page;
     }
@@ -45,6 +48,13 @@ public class MainActivity extends Activity {
         shape.setCornerRadius(dp(12));
         shape.setStroke(dp(focused ? 3 : 1), focused ? 0xff9ac2ff : 0xff3a4b6b);
         return shape;
+    }
+
+    private StateListDrawable highlightOnFocus(int fill) {
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff1dbaf1, true));
+        background.addState(new int[] {}, tile(fill, false));
+        return background;
     }
 
     private Button button(String title, Runnable action) {
@@ -67,13 +77,15 @@ public class MainActivity extends Activity {
 
     private TransferServer receiver;
     private TextView pairing;
+    private boolean pairingFromDevicePage;
     private FileApprovalDialog fileApprovalDialog;
     private final android.os.Handler refresh = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable updatePairing = new Runnable() {
         @Override public void run() {
             if (pairing == null) return;
             if (isLinked()) {
-                showReceive();
+                if (pairingFromDevicePage) showLinkStatus();
+                else showReceive();
             } else if (receiver != null) {
                 pairing.setText(receiver.pairingStatus());
                 showFileApproval();
@@ -92,9 +104,32 @@ public class MainActivity extends Activity {
     }
 
     private Button pairedHeader;
+    private TextView deviceCardName;
+    private LinearLayout deviceCard;
+    private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
+            (prefs, key) -> {
+                if ("peer_name".equals(key) || "link_token".equals(key)) updateDeviceLabels();
+            };
+
+    private void updateDeviceLabels() {
+        boolean linked = isLinked();
+        if (pairedHeader != null) {
+            pairedHeader.setText(linked ? peerName() : "Pair");
+            pairedHeader.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                    linked ? R.drawable.ic_link : 0, 0, 0, 0);
+        }
+        if (deviceCardName != null && linked) deviceCardName.setText(peerName());
+        if (deviceCard != null && !linked) {
+            LinearLayout body = (LinearLayout) deviceCard.getParent();
+            body.removeView(deviceCard);
+            deviceCardName = null;
+            deviceCard = null;
+            addUnlinkedDevice(body);
+        }
+    }
 
     private String peerName() {
-        return getPreferences(MODE_PRIVATE).getString("peer_name", "Linked phone");
+        return getPreferences(MODE_PRIVATE).getString("peer_name", "Name unavailable");
     }
 
     private void addHeader(LinearLayout page) {
@@ -109,15 +144,9 @@ public class MainActivity extends Activity {
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
         Button pair = button(isLinked() ? peerName() : "Pair", this::showLinkStatus);
         pairedHeader = pair;
-        Runnable refreshHeader = new Runnable() {
-            public void run() {
-                if (!pair.isAttachedToWindow() || pairedHeader != pair) return;
-                String currentName = isLinked() ? peerName() : "Pair";
-                if (!currentName.contentEquals(pair.getText())) pair.setText(currentName);
-                pair.postDelayed(this, 500);
-            }
-        };
-        pair.post(refreshHeader);
+        pair.setCompoundDrawablePadding(dp(8));
+        pair.setPadding(dp(12), 0, dp(12), 0);
+        updateDeviceLabels();
         pair.setMaxWidth(dp(280));
         pair.setSingleLine(true);
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -140,12 +169,15 @@ public class MainActivity extends Activity {
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
-        titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
+        boolean showBack = !"Pair".equals(title) && !"Remote".equals(title);
+        if (showBack) {
+            titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
+        }
         TextView heading = new TextView(this);
         heading.setText(title);
         heading.setTextSize(24);
         heading.setTextColor(Color.WHITE);
-        heading.setPadding(dp(16), 0, 0, 0);
+        heading.setPadding(showBack ? dp(16) : 0, 0, 0, 0);
         titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
         if ("My Files".equals(title)) {
             titleRow.addView(button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
@@ -171,7 +203,7 @@ public class MainActivity extends Activity {
         page.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         int width = Math.round((metrics.widthPixels - dp(48)) * .23f);
-        int height = Math.min(Math.round(metrics.heightPixels * .62f), metrics.heightPixels - dp(126));
+        int height = Math.min(Math.round(metrics.heightPixels * .44f), metrics.heightPixels - dp(126));
         String[] titles = {"Send / Receive", "Remote", "Files"};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
@@ -179,18 +211,15 @@ public class MainActivity extends Activity {
         row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 2));
         for (int index = 0; index < titles.length; index++) {
             Button card = button(titles[index], actions[index]);
-            StateListDrawable focusBackground = new StateListDrawable();
-            focusBackground.addState(new int[] {android.R.attr.state_focused}, tile(0xff1dbaf1, true));
-            focusBackground.addState(new int[] {}, tile(0xff1b2740, false));
-            card.setBackground(focusBackground);
+            card.setBackground(highlightOnFocus(0xff1b2740));
             card.setTextColor(new android.content.res.ColorStateList(
                     new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
                     new int[] {0xff0c1c35, Color.WHITE}));
             android.graphics.drawable.Drawable icon = getDrawable(icons[index]).mutate();
-            int iconSize = Math.min(dp(70), width / 2);
+            int iconSize = Math.min(dp(56), width / 2);
             icon.setBounds(0, 0, iconSize, iconSize);
             card.setCompoundDrawables(null, icon, null, null);
-            card.setPadding(dp(4), height / 4, dp(4), height / 7);
+            card.setPadding(dp(4), height / 6, dp(4), height / 9);
             card.setTextSize(22);
             card.getCompoundDrawables()[1].mutate().setTintList(new android.content.res.ColorStateList(
                     new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
@@ -332,23 +361,42 @@ public class MainActivity extends Activity {
         LinearLayout body = feature("Pair");
         if (isLinked()) showDevice(body);
         else {
-            info(body, "Device · No phone linked");
-            startPairing(body);
+            info(body, "Device:");
+            info(body, "No phone linked.");
+            startPairing(body, true);
         }
     }
 
     private void showDevice(LinearLayout body) {
-        info(body, "Device");
+        info(body, "Device:");
         if (!isLinked()) {
-            info(body, "No phone linked for file transfer.");
-            body.addView(button("Pair", this::showLinkStatus));
+            addUnlinkedDevice(body);
             return;
         }
-        info(body, peerName() + " · Paired for file transfer");
-        body.addView(button("Unpair", () -> new AlertDialog.Builder(this).setTitle("Unpair " + peerName() + "?")
+        LinearLayout card = new LinearLayout(this);
+        deviceCard = card;
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
+        card.setBackground(tile(0xff1b2740, false));
+        body.addView(card, new LinearLayout.LayoutParams(dp(244), -2));
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_phone);
+        card.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        deviceCardName = info(card, peerName());
+        deviceCardName.setGravity(Gravity.CENTER);
+        deviceCardName.setMaxLines(2);
+        deviceCardName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(button("Unpair", () -> new AlertDialog.Builder(this).setTitle("Unpair " + peerName() + "?")
                 .setMessage("This removes the file link. Android TV Remote access can be removed in system settings.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show()));
+                .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show()), new LinearLayout.LayoutParams(-1, dp(44)));
+    }
+
+    private void addUnlinkedDevice(LinearLayout body) {
+        info(body, "No phone linked.");
+        body.addView(button("Pair", this::showLinkStatus));
     }
 
     private void unpairPhone() {
@@ -368,7 +416,8 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startPairing(LinearLayout body) {
+    private void startPairing(LinearLayout body, boolean fromDevicePage) {
+        pairingFromDevicePage = fromDevicePage;
         if (!startReceiver()) return;
         info(body, "On your phone, tap Pair → Find TV. Keep this TV screen open.");
         pairing = new TextView(this);
@@ -428,7 +477,7 @@ public class MainActivity extends Activity {
         if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
             info(body, "Receive Transfers is disabled in Settings.");
         } else if (!isLinked()) {
-            startPairing(body);
+            startPairing(body, false);
         } else {
             info(body, startReceiver() ? "Ready to receive from your linked phone." : "Could not start receiver.");
         }
@@ -628,10 +677,7 @@ public class MainActivity extends Activity {
         row.setPadding(dp(16), 0, dp(16), 0);
         row.setFocusable(true);
         row.setOnClickListener(view -> fileActions(file));
-        StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff07336c, true));
-        background.addState(new int[] {}, tile(0xff101f3c, false));
-        row.setBackground(background);
+        row.setBackground(highlightOnFocus(0xff101f3c));
         LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, dp(62));
         rowSize.bottomMargin = dp(4);
         body.addView(row, rowSize);
@@ -676,6 +722,12 @@ public class MainActivity extends Activity {
         date.setTextColor(Color.WHITE);
         date.setTextSize(15);
         row.addView(date);
+        row.setOnFocusChangeListener((view, focused) -> {
+            int textColor = focused ? 0xff0c1c35 : Color.WHITE;
+            name.setTextColor(focused ? textColor : 0xff20c7f3);
+            size.setTextColor(textColor);
+            date.setTextColor(textColor);
+        });
     }
 
     private void fileActions(File file) {
@@ -789,10 +841,34 @@ public class MainActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart();
-        if (isLinked()) startReceiver();
+        if (isLinked()) {
+            startReceiver();
+            recoverDeviceName();
+        }
+    }
+
+    private void recoverDeviceName() {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        String host = prefs.getString("peer_host", "");
+        String token = prefs.getString("link_token", "");
+        if (host.isEmpty() || token.isEmpty() || prefs.contains("peer_name")) return;
+        String localName = TvSettings.device(this);
+        sender.execute(() -> {
+            try (TransferClient client = new TransferClient(host, "DEVICE", token)) {
+                String name = client.exchangeDeviceName(localName);
+                runOnUiThread(() -> {
+                    if (!name.isEmpty() && token.equals(prefs.getString("link_token", ""))) {
+                        prefs.edit().putString("peer_name", name).apply();
+                    }
+                });
+            } catch (IOException error) {
+                android.util.Log.d("TVLink", "Could not recover paired phone name", error);
+            }
+        });
     }
 
     @Override protected void onDestroy() {
+        getPreferences(MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(deviceListener);
         if (activeSend != null) {
             activeSend.cancel();
             activeSend.dialog.dismiss();
