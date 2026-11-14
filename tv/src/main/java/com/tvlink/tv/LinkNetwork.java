@@ -14,6 +14,7 @@ final class LinkNetwork implements AutoCloseable {
     private static final int PORT = 47833;
     private static final String PREFIX = "TVLink1";
     private final DatagramSocket listener;
+    private volatile boolean pairing;
 
     LinkNetwork(SharedPreferences settings) {
         DatagramSocket socket = null;
@@ -40,12 +41,26 @@ final class LinkNetwork implements AutoCloseable {
         }
     }
 
+    void enablePairingDiscovery(boolean enabled) {
+        pairing = enabled;
+    }
+
     private void respond(SharedPreferences settings) {
         while (!listener.isClosed()) {
             try {
                 DatagramPacket request = new DatagramPacket(new byte[128], 128);
                 listener.receive(request);
-                String[] parts = decode(request).split(" ", 3);
+                String message = decode(request);
+                String prefix = "TVLinkPair1 ";
+                if (pairing && message.startsWith(prefix)) {
+                    String nonce = message.substring(prefix.length());
+                    if (!nonce.matches("[0-9a-f-]{36}")) continue;
+                    String name = settings.getString("device_name", android.os.Build.MODEL);
+                    byte[] response = (message + " " + name).getBytes(StandardCharsets.UTF_8);
+                    listener.send(new DatagramPacket(response, response.length, request.getSocketAddress()));
+                    continue;
+                }
+                String[] parts = message.split(" ", 3);
                 String token = settings.getString("link_token", "");
                 if (token.isEmpty() || parts.length != 3 || !PREFIX.equals(parts[0])
                         || !matches(sign(token, "lookup-tv", parts[1]), parts[2])) continue;

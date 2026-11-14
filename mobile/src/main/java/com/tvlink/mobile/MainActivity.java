@@ -503,47 +503,83 @@ public class MainActivity extends Activity {
 
     private void pairSystemRemote(Runnable paired) {
         if (remotePairing || busy) return;
-        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        EditText ip = new EditText(this);
-        ip.setSingleLine(true);
-        ip.setHint("TV IP address");
-        ip.setText(prefs.getString("pending_host", prefs.getString("remote_host", prefs.getString("host", ""))));
-        new AlertDialog.Builder(this).setTitle("Pair TV").setMessage("Connect both devices to the same Wi-Fi. Open Pair in TVLink on the TV, then enter the address shown there.").setView(ip)
+        new AlertDialog.Builder(this).setTitle("Pair TV")
+                .setMessage("Open Pair in TVLink on your TV. Keep both devices on the same Wi-Fi.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Connect", (dialog, which) -> {
-                    String host = ip.getText().toString().trim();
-                    if (!android.util.Patterns.IP_ADDRESS.matcher(host).matches()) {
-                        notifyUser("Enter a valid TV IP address.");
-                        return;
+                .setPositiveButton("Find TV", (dialog, choice) -> findPairingTv(paired))
+                .show();
+    }
+
+    private void findPairingTv(Runnable paired) {
+        if (remotePairing || isFinishing() || isDestroyed()) return;
+        remotePairing = true;
+        notifyUser("Looking for your TV…");
+        remoteIo.execute(() -> {
+            try {
+                java.util.Map<String, String> devices = LinkNetwork.findPairingTvs();
+                runOnUiThread(() -> {
+                    remotePairing = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    if (devices.isEmpty()) {
+                        new AlertDialog.Builder(this).setTitle("No TV found")
+                                .setMessage("Open Pair on your TV and check that both devices are on the same Wi-Fi.")
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired))
+                                .show();
+                    } else if (devices.size() == 1) {
+                        connectForPairing(devices.keySet().iterator().next(), paired);
+                    } else {
+                        String[] hosts = devices.keySet().toArray(new String[0]);
+                        String[] names = devices.values().toArray(new String[0]);
+                        new AlertDialog.Builder(this).setTitle("Choose your TV")
+                                .setItems(names, (dialog, choice) -> connectForPairing(hosts[choice], paired))
+                                .setNegativeButton("Cancel", null).show();
                     }
-                    remotePairing = true;
-                    remoteIo.execute(() -> {
-                        AndroidTvRemote pairing = null;
-                        try {
-                            String previousHost = prefs.getString("pending_host", prefs.getString("remote_host", ""));
-                            String previousPin = prefs.getString("pending_pin", prefs.getString("remote_pin", ""));
-                            if (!previousPin.isEmpty() && previousHost.equals(host)) {
-                                try {
-                                    finishLink(host, previousPin);
-                                    showLinkComplete(paired);
-                                    return;
-                                } catch (RemoteUnavailable error) {
-                                    // The TV may have revoked the saved Android TV Remote pairing.
-                                }
-                            }
-                            pairing = new AndroidTvRemote(host, true, "");
-                            pairing.beginPairing();
-                            AndroidTvRemote pending = pairing;
-                            runOnUiThread(() -> enterRemoteCode(pending, host, paired));
-                        } catch (Exception error) {
-                            if (pairing != null) pairing.close();
-                            runOnUiThread(() -> {
-                                remotePairing = false;
-                                notifyUser("Could not link TV: " + error.getMessage());
-                            });
-                        }
-                    });
-                }).show();
+                });
+            } catch (IOException error) {
+                runOnUiThread(() -> {
+                    remotePairing = false;
+                    notifyUser("Could not search your Wi-Fi for a TV.");
+                });
+            }
+        });
+    }
+
+    private void connectForPairing(String host, Runnable paired) {
+        if (remotePairing || isFinishing() || isDestroyed()) return;
+        remotePairing = true;
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        remoteIo.execute(() -> {
+            AndroidTvRemote pairing = null;
+            try {
+                String previousHost = prefs.getString("pending_host", prefs.getString("remote_host", ""));
+                String previousPin = prefs.getString("pending_pin", prefs.getString("remote_pin", ""));
+                if (!previousPin.isEmpty() && previousHost.equals(host)) {
+                    try {
+                        finishLink(host, previousPin);
+                        showLinkComplete(paired);
+                        return;
+                    } catch (RemoteUnavailable error) {
+                        // Try the system pairing flow if a saved remote connection no longer works.
+                    }
+                }
+                pairing = new AndroidTvRemote(host, true, "");
+                pairing.beginPairing();
+                AndroidTvRemote pending = pairing;
+                runOnUiThread(() -> enterRemoteCode(pending, host, paired));
+            } catch (Exception error) {
+                if (pairing != null) pairing.close();
+                android.util.Log.w("TVLink", "TV pairing failed before entering code", error);
+                runOnUiThread(() -> {
+                    remotePairing = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    String detail = error.getMessage();
+                    new AlertDialog.Builder(this).setTitle("Could not start Android TV pairing")
+                            .setMessage(detail == null ? error.getClass().getSimpleName() : detail)
+                            .setPositiveButton("OK", null).show();
+                });
+            }
+        });
     }
 
     private void enterRemoteCode(AndroidTvRemote pairing, String host, Runnable paired) {

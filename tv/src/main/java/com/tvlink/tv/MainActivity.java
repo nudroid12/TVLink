@@ -343,7 +343,6 @@ public class MainActivity extends Activity {
         }
         if (!startReceiver()) return;
         info(body, "Open Pair in TVLink on your phone using the same Wi-Fi.");
-        info(body, "TV address: " + localAddresses());
         pairing = new TextView(this);
         pairing.setText("Enter the code on your phone when Android TV shows it.");
         body.addView(pairing);
@@ -466,24 +465,6 @@ public class MainActivity extends Activity {
                 sendToPhone(host, token, name, size, stream);
             }
         });
-    }
-
-    private String localAddresses() {
-        java.util.List<String> addresses = new java.util.ArrayList<>();
-        try {
-            java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
-            while (interfaces != null && interfaces.hasMoreElements()) {
-                java.net.NetworkInterface nic = interfaces.nextElement();
-                if (!nic.isUp() || nic.isLoopback()) continue;
-                java.util.Enumeration<java.net.InetAddress> list = nic.getInetAddresses();
-                while (list.hasMoreElements()) {
-                    java.net.InetAddress address = list.nextElement();
-                    if (address instanceof java.net.Inet4Address) addresses.add(address.getHostAddress());
-                }
-            }
-        } catch (IOException ignored) {}
-        return addresses.isEmpty() ? "Check network settings"
-                : android.text.TextUtils.join(" / ", addresses);
     }
 
     private void showFiles() {

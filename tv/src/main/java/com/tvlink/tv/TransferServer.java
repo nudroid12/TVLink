@@ -65,6 +65,7 @@ final class TransferServer implements AutoCloseable {
 
     void enableLinking(boolean enabled) {
         linkKeys.enable(enabled);
+        discovery.enablePairingDiscovery(enabled);
     }
 
     boolean linkKey(int digit) {
@@ -82,7 +83,7 @@ final class TransferServer implements AutoCloseable {
                 if (!settings.edit().putString("peer_host", host).putString("link_token", token).commit()) {
                     throw new IOException("Could not save the link on the TV");
                 }
-                linkKeys.enable(false);
+                enableLinking(false);
             }
         }
         out.writeUTF("OK");

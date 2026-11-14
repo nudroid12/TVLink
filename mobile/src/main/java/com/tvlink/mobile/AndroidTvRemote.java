@@ -62,7 +62,11 @@ final class AndroidTvRemote implements AutoCloseable {
         try {
             socket.connect(new InetSocketAddress(host, pairing ? 6467 : 6466), 5000);
             socket.setSoTimeout(8000);
-            socket.startHandshake();
+            try {
+                socket.startHandshake();
+            } catch (SSLException error) {
+                throw new IOException("TLS handshake with Android TV Remote Service failed: " + error.getMessage(), error);
+            }
             input = new DataInputStream(socket.getInputStream());
             output = socket.getOutputStream();
         } catch (Exception error) {
@@ -81,13 +85,20 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     void beginPairing() throws IOException {
-        pairMessage(10, concat(string(1, "atvremote"), string(2, "TVLink")));
-        expectPair(11);
-        byte[] encoding = concat(number(1, 3), number(2, 6));
-        pairMessage(20, concat(field(1, encoding), number(3, 1)));
-        expectPair(20);
-        pairMessage(30, concat(field(1, encoding), number(2, 1)));
-        expectPair(31);
+        String step = "pairing request";
+        try {
+            pairMessage(10, concat(string(1, "atvremote"), string(2, "TVLink")));
+            expectPair(11);
+            step = "code format negotiation";
+            byte[] encoding = concat(number(1, 3), number(2, 6));
+            pairMessage(20, concat(field(1, encoding), number(3, 1)));
+            expectPair(20);
+            step = "pairing configuration";
+            pairMessage(30, concat(field(1, encoding), number(2, 1)));
+            expectPair(31);
+        } catch (IOException error) {
+            throw new IOException("Android TV Remote Service failed at " + step + ": " + error.getMessage(), error);
+        }
     }
 
     String finishPairing(String code) throws Exception {

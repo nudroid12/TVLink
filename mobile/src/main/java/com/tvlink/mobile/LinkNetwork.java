@@ -57,6 +57,35 @@ final class LinkNetwork implements AutoCloseable {
         }
     }
 
+    static java.util.Map<String, String> findPairingTvs() throws IOException {
+        java.util.Map<String, String> devices = new java.util.LinkedHashMap<>();
+        String marker = "TVLinkPair1 " + UUID.randomUUID();
+        byte[] request = marker.getBytes(StandardCharsets.UTF_8);
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setBroadcast(true);
+            InetAddress broadcast = InetAddress.getByName("255.255.255.255");
+            long deadline = android.os.SystemClock.elapsedRealtime() + 2200;
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                socket.send(new DatagramPacket(request, request.length, broadcast, PORT));
+                long nextProbe = Math.min(deadline, android.os.SystemClock.elapsedRealtime() + 550);
+                while (android.os.SystemClock.elapsedRealtime() < nextProbe) {
+                    socket.setSoTimeout((int) Math.max(1, nextProbe - android.os.SystemClock.elapsedRealtime()));
+                    DatagramPacket reply = new DatagramPacket(new byte[256], 256);
+                    try {
+                        socket.receive(reply);
+                    } catch (SocketTimeoutException timeout) {
+                        break;
+                    }
+                    String message = decode(reply);
+                    if (reply.getPort() == PORT && message.startsWith(marker + " ")) {
+                        devices.put(reply.getAddress().getHostAddress(), message.substring(marker.length() + 1));
+                    }
+                }
+            }
+        }
+        return devices;
+    }
+
     static String resolve(String host, String token) throws IOException {
         try (TransferClient client = new TransferClient(host, "PING", token)) {
             client.confirm();
