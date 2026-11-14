@@ -25,7 +25,6 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         setTheme(R.style.TVLinkTheme);
         super.onCreate(state);
-        if (state != null) exportName = state.getString("export_name");
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
     }
@@ -70,7 +69,7 @@ public class MainActivity extends Activity {
     private void styleRowText(TextView text) {
         text.setTextColor(Color.WHITE);
         text.setTextSize(18);
-        text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
     }
 
     private Button button(String title, Runnable action) {
@@ -669,7 +668,14 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
-            if (!isFinishing() && !isDestroyed()) notifyUser(outcome);
+            if (isFinishing() || isDestroyed()) return;
+            if (outcome.startsWith("Could not send: ")) {
+                new AlertDialog.Builder(this).setTitle("Send to phone failed")
+                        .setMessage(outcome.substring("Could not send: ".length()))
+                        .setPositiveButton("OK", null).show();
+            } else {
+                notifyUser(outcome);
+            }
         });
     }
 
@@ -704,24 +710,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static final int EXPORT_FILE = 12;
-    private String exportName;
-
-    @Override protected void onSaveInstanceState(Bundle state) {
-        super.onSaveInstanceState(state);
-        state.putString("export_name", exportName);
-    }
-
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == EXPORT_FILE) {
-            String name = exportName;
-            exportName = null;
-            if (result == RESULT_OK && name != null && data != null && data.getData() != null) {
-                exportCopy(name, data.getData());
-            }
-            return;
-        }
         if (request != 11 || result != RESULT_OK || data == null || data.getData() == null || !isLinked()) return;
         android.net.Uri uri = data.getData();
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
@@ -845,6 +835,7 @@ public class MainActivity extends Activity {
         labels.setPadding(dp(12), 0, 0, 0);
         heading.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = addTransferHeading(labels, filename);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
         title.setMaxLines(2);
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         info(labels, type + " · " + android.text.format.Formatter.formatShortFileSize(this, file.length()));
@@ -854,8 +845,6 @@ public class MainActivity extends Activity {
                 Color.WHITE, () -> openFile(file, apk));
         addFileAction(panel, dialog, "Rename", R.drawable.ic_file_rename, Color.WHITE, () -> renameFile(file));
         addFileAction(panel, dialog, "Send to phone", R.drawable.ic_phone, Color.WHITE, () -> sendFile(file));
-        addFileAction(panel, dialog, "Save a copy", R.drawable.ic_file_copy, Color.WHITE,
-                () -> chooseExportLocation(file));
         addFileAction(panel, dialog, "Delete", R.drawable.ic_file_delete, 0xffff8585,
                 () -> new AlertDialog.Builder(this).setTitle("Delete file?")
                         .setMessage(filename).setNegativeButton("Cancel", null)
@@ -872,7 +861,7 @@ public class MainActivity extends Activity {
             window.setDimAmount(.55f);
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             window.setLayout(Math.min(dp(560), metrics.widthPixels - dp(48)),
-                    Math.min(dp(382), metrics.heightPixels - dp(40)));
+                    Math.min(dp(334), metrics.heightPixels - dp(40)));
         }
         open.requestFocus();
     }
@@ -885,6 +874,7 @@ public class MainActivity extends Activity {
         });
         row.setBackground(flatRowBackground());
         row.setTextColor(color);
+        row.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), 0, dp(14), 0);
         row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
@@ -892,37 +882,6 @@ public class MainActivity extends Activity {
         row.setCompoundDrawablePadding(dp(14));
         panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
         return row;
-    }
-
-    private void chooseExportLocation(File file) {
-        Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream");
-        picker.addCategory(Intent.CATEGORY_OPENABLE);
-        picker.putExtra(Intent.EXTRA_TITLE, file.getName());
-        try {
-            exportName = file.getName();
-            startActivityForResult(picker, EXPORT_FILE);
-        } catch (android.content.ActivityNotFoundException error) {
-            exportName = null;
-            notifyUser("No document picker is available on this device.");
-        }
-    }
-
-    private void exportCopy(String name, android.net.Uri target) {
-        File folder = received();
-        sender.execute(() -> {
-            try {
-                File source = TransferServer.file(folder, name);
-                try (InputStream in = new FileInputStream(source);
-                     OutputStream out = getContentResolver().openOutputStream(target, "wt")) {
-                    if (out == null) throw new IOException("Cannot write the selected document");
-                    byte[] buffer = new byte[65536];
-                    for (int count; (count = in.read(buffer)) != -1;) out.write(buffer, 0, count);
-                }
-                runOnUiThread(() -> notifyUser("Copy saved: " + name));
-            } catch (IOException | SecurityException error) {
-                runOnUiThread(() -> notifyUser("Could not save copy: " + error.getMessage()));
-            }
-        });
     }
 
     private void renameFile(File file) {
