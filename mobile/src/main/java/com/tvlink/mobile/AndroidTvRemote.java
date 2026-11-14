@@ -143,8 +143,19 @@ final class AndroidTvRemote implements AutoCloseable {
     void start(java.util.function.Consumer<String> log) throws IOException {
         int features = 3;
         int frames = 0;
+        boolean activated = false;
+        long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
         while (!closed && frames++ < 64) {
-            Map<Integer, Object> message = read();
+            long remaining = deadline - android.os.SystemClock.elapsedRealtime();
+            if (remaining <= 0) break;
+            socket.setSoTimeout((int) remaining);
+            Map<Integer, Object> message;
+            try {
+                message = read();
+            } catch (java.net.SocketTimeoutException timeout) {
+                throw new IOException(activated ? "TV did not send Remote ready after activation (5s limit)"
+                        : "TV did not finish Remote negotiation (5s limit)", timeout);
+            }
             if (message.containsKey(1)) {
                 log.accept("TV sent Remote configuration.");
                 Map<Integer, Object> config = parse((byte[]) message.get(1));
@@ -155,7 +166,8 @@ final class AndroidTvRemote implements AutoCloseable {
             }
             if (message.containsKey(2)) {
                 write(field(2, number(1, features)));
-                log.accept("Remote activated. Waiting for TV ready message…");
+                activated = true;
+                log.accept("Activation sent. Waiting for TV ready (5s negotiation limit)…");
             }
             if (message.containsKey(3)) throw new IOException("TV rejected remote connection");
             pong(message);
@@ -165,7 +177,8 @@ final class AndroidTvRemote implements AutoCloseable {
                 return;
             }
         }
-        throw new IOException("TV did not start the remote session");
+        throw new IOException(activated ? "TV did not send Remote ready after activation"
+                : "TV did not finish Remote negotiation");
     }
 
     private void startKeepalive() throws IOException {

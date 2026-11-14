@@ -951,10 +951,14 @@ public class MainActivity extends Activity {
         private final TextView output = new TextView(MainActivity.this);
         private final ScrollView scroll = new ScrollView(MainActivity.this);
 
+        private boolean closedByUser;
+
         PairingLog() {
             super(MainActivity.this, R.style.TVLinkPairingDialog);
             setTitle("Connecting");
             setCancelable(false);
+            setButton(BUTTON_NEGATIVE, "Close", (dialog, which) -> closedByUser = true);
+            setButton(BUTTON_NEUTRAL, "Copy log", (dialog, which) -> {});
             output.setTypeface(android.graphics.Typeface.MONOSPACE);
             output.setTextColor(0xffe4ecff);
             output.setPadding(dp(24), dp(8), dp(24), dp(8));
@@ -962,6 +966,22 @@ public class MainActivity extends Activity {
             LinearLayout container = new LinearLayout(MainActivity.this);
             container.addView(scroll, new LinearLayout.LayoutParams(-1, dp(160)));
             setView(container);
+        }
+
+        @Override public void show() {
+            if (closedByUser) return;
+            super.show();
+            getButton(BUTTON_NEUTRAL).setOnClickListener(view -> copyLog());
+        }
+
+        private void copyLog() {
+            android.content.ClipboardManager clipboard = getSystemService(android.content.ClipboardManager.class);
+            if (clipboard == null) {
+                notifyUser("Clipboard unavailable");
+                return;
+            }
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TVLink connection log", entries.toString()));
+            notifyUser("Log copied");
         }
 
         void step(String message) {
@@ -981,7 +1001,9 @@ public class MainActivity extends Activity {
             new AlertDialog.Builder(MainActivity.this, R.style.TVLinkPairingDialog)
                     .setTitle(title).setMessage(entries.toString())
                     .setNegativeButton("Close", null)
-                    .setPositiveButton("Try again", (d, w) -> retry.run()).show();
+                    .setNeutralButton("Copy log", null)
+                    .setPositiveButton("Try again", (d, w) -> retry.run()).show()
+                    .getButton(BUTTON_NEUTRAL).setOnClickListener(view -> copyLog());
         }
     }
 
