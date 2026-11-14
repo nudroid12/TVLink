@@ -220,6 +220,7 @@ public class MainActivity extends Activity {
     }
 
     private void home() {
+        remoteStatus = null;
         showingHome = true;
         LinearLayout page = screen(null);
         LinearLayout header = new LinearLayout(this);
@@ -681,16 +682,129 @@ public class MainActivity extends Activity {
     private AndroidTvRemote remoteConnection;
     private boolean remotePairing;
 
+    private static final int REMOTE_NAVY = 0xff0b1329;
+    private static final int REMOTE_BLUE = 0xffaec0ff;
+    private static final int REMOTE_OUTLINE = 0xff82aaff;
+
     private void showRemote() {
-        LinearLayout body = feature("Remote");
-        TextView status = info(body, "Connecting to Android TV Remote Service…");
+        showingHome = false;
+        LinearLayout page = screen(null);
+        page.setPadding(dp(20), dp(12), dp(20), dp(16));
+        page.setBackgroundColor(REMOTE_NAVY);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
+        header.addView(remoteIcon("left", "Close Remote", this::home, false, 24, false),
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView title = new TextView(this);
+        title.setText("Remote");
+        title.setTextSize(26);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        title.setTextColor(REMOTE_BLUE);
+        title.setGravity(Gravity.CENTER);
+        header.addView(title, new LinearLayout.LayoutParams(0, -1, 1));
+        header.addView(new android.view.View(this), new LinearLayout.LayoutParams(dp(48), 1));
+
+        TextView status = info(page, "Connecting…");
+        status.setGravity(Gravity.CENTER);
+        status.setTextColor(REMOTE_BLUE);
+        status.setMaxLines(2);
         remoteStatus = status;
-        body.addView(button("Reconnect", () -> connectRemoteScreen(status)));
+        Button reconnect = button("Reconnect", () -> connectRemoteScreen(status));
+        reconnect.setTextColor(REMOTE_NAVY);
+        reconnect.setBackground(remoteBackground(REMOTE_BLUE, 0, 24));
+        LinearLayout.LayoutParams reconnectSize = new LinearLayout.LayoutParams(dp(144), dp(44));
+        reconnectSize.gravity = Gravity.CENTER;
+        page.addView(reconnect, reconnectSize);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.CENTER);
+        controls.setPadding(0, dp(16), 0, dp(8));
+        scroll.addView(controls, new ScrollView.LayoutParams(-1, -2));
+        controls.addView(remoteKey("power", "Power", 26, false, 24),
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int height = getResources().getDisplayMetrics().heightPixels;
+        int diameter = Math.max(dp(170), Math.min(dp(300), Math.min(width - dp(64), height / 3)));
+        android.widget.FrameLayout pad = new android.widget.FrameLayout(this);
+        pad.setBackground(remoteBackground(REMOTE_BLUE, 0, 200));
+        LinearLayout.LayoutParams padSize = new LinearLayout.LayoutParams(diameter, diameter);
+        padSize.setMargins(0, dp(18), 0, dp(22));
+        controls.addView(pad, padSize);
+        int target = Math.round(diameter * .30f);
+        addDirection(pad, "up", "Up", 19, Gravity.TOP | Gravity.CENTER_HORIZONTAL, target);
+        addDirection(pad, "down", "Down", 20, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, target);
+        addDirection(pad, "left", "Left", 21, Gravity.LEFT | Gravity.CENTER_VERTICAL, target);
+        addDirection(pad, "right", "Right", 22, Gravity.RIGHT | Gravity.CENTER_VERTICAL, target);
+        Button ok = button("OK", () -> sendSystemKey(23));
+        ok.setPadding(0, 0, 0, 0);
+        ok.setTextColor(REMOTE_BLUE);
+        ok.setTextSize(22);
+        ok.setBackground(remoteBackground(REMOTE_NAVY, 0, 120));
+        int center = Math.round(diameter * .42f);
+        pad.addView(ok, new android.widget.FrameLayout.LayoutParams(center, center, Gravity.CENTER));
+
+        addRemoteControls(controls, "back", "Back", 4, "home", "Home", 3, "volume_up", "Volume up", 24, true);
+        addRemoteControls(controls, "mic", "Voice assistant", 231, "mute", "Mute", 164,
+                "volume_down", "Volume down", 25, false);
         connectRemoteScreen(status);
-        remoteRow(body, new String[] {"↑"}, new int[] {19});
-        remoteRow(body, new String[] {"←", "OK", "→"}, new int[] {21, 23, 22});
-        remoteRow(body, new String[] {"↓"}, new int[] {20});
-        remoteRow(body, new String[] {"Back", "Home"}, new int[] {4, 3});
+    }
+
+    private StateListDrawable remoteBackground(int fill, int border, int radius) {
+        StateListDrawable background = new StateListDrawable();
+        GradientDrawable pressed = new GradientDrawable();
+        pressed.setColor(fill == REMOTE_BLUE ? 0xff87a0f6 : 0xff31446d);
+        pressed.setCornerRadius(dp(radius));
+        GradientDrawable normal = new GradientDrawable();
+        normal.setColor(fill);
+        normal.setCornerRadius(dp(radius));
+        if (border != 0) normal.setStroke(dp(1), border);
+        background.addState(new int[] {android.R.attr.state_pressed}, pressed);
+        background.addState(new int[] {}, normal);
+        return background;
+    }
+
+    private RemoteIconView remoteIcon(String icon, String label, Runnable action, boolean light,
+                                      int radius, boolean onPad) {
+        RemoteIconView button = new RemoteIconView(this, icon, label,
+                light || onPad ? REMOTE_NAVY : REMOTE_BLUE);
+        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_BLUE : REMOTE_NAVY,
+                light || onPad ? 0 : REMOTE_OUTLINE, radius));
+        button.setOnClickListener(view -> action.run());
+        return button;
+    }
+
+    private RemoteIconView remoteKey(String icon, String label, int key, boolean light, int radius) {
+        return remoteIcon(icon, label, () -> sendSystemKey(key), light, radius, false);
+    }
+
+    private void addDirection(android.widget.FrameLayout pad, String icon, String label, int key,
+                              int gravity, int size) {
+        pad.addView(remoteIcon(icon, label, () -> sendSystemKey(key), false, 36, true),
+                new android.widget.FrameLayout.LayoutParams(size, size, gravity));
+    }
+
+    private void addRemoteControls(LinearLayout controls, String left, String leftLabel, int leftKey,
+                                   String middle, String middleLabel, int middleKey, String right,
+                                   String rightLabel, int rightKey, boolean home) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, dp(56));
+        rowSize.bottomMargin = dp(10);
+        controls.addView(row, rowSize);
+        row.addView(remoteKey(left, leftLabel, leftKey, false, 28),
+                new LinearLayout.LayoutParams(dp(56), dp(56)));
+        LinearLayout.LayoutParams centerSize = new LinearLayout.LayoutParams(dp(104), dp(home ? 56 : 44));
+        centerSize.setMargins(dp(18), 0, dp(18), 0);
+        row.addView(remoteKey(middle, middleLabel, middleKey, home, home ? 28 : 12), centerSize);
+        row.addView(remoteKey(right, rightLabel, rightKey, false, 28),
+                new LinearLayout.LayoutParams(dp(56), dp(56)));
     }
 
     private void pairSystemRemote() {
@@ -1108,19 +1222,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void remoteRow(LinearLayout body, String[] names, int[] keys) {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        body.addView(row);
-        for (int index = 0; index < names.length; index++) {
-            int key = keys[index];
-            Button control = button(names[index], () -> sendSystemKey(key));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(52));
-            params.setMargins(dp(3), dp(3), dp(3), dp(3));
-            row.addView(control, params);
-        }
-    }
-
     private TextView remoteStatus;
     private boolean remoteConnecting;
 
@@ -1140,7 +1241,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 remoteConnecting = false;
                 progress.dismiss();
-                if (isFinishing() || isDestroyed()) return;
+                if (isFinishing() || isDestroyed() || remoteStatus != status) return;
                 if (result == null) {
                     status.setText("Remote connected");
                 } else {
@@ -1152,7 +1253,7 @@ public class MainActivity extends Activity {
     }
 
     private void sendSystemKey(int key) {
-        if (remotePairing || remoteConnecting) return;
+        if (remotePairing || remoteConnecting || remoteStatus == null) return;
         TextView status = remoteStatus;
         remoteIo.execute(() -> {
             try {
