@@ -324,7 +324,7 @@ public class MainActivity extends Activity {
     private boolean startReceiver() {
         if (receiver != null) return true;
         try {
-            receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
+            receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
             return true;
         } catch (IOException error) {
             notifyUser("Cannot start receiver: " + error.getMessage());

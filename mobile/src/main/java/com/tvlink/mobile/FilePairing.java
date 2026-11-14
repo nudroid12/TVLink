@@ -25,7 +25,7 @@ final class FilePairing {
         return encode(MessageDigest.getInstance("SHA-256").digest(key.getBytes(StandardCharsets.US_ASCII)));
     }
 
-    static Result derive(KeyPair own, String clientKey, String serverKey, boolean client)
+    static Result derive(KeyPair own, String clientKey, String serverKey, boolean client, String binding)
             throws GeneralSecurityException, IOException {
         String peer = client ? serverKey : clientKey;
         if (peer.length() > 256) throw new IOException("Invalid file pairing key");
@@ -36,9 +36,9 @@ final class FilePairing {
         agreement.doPhase(key, true);
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(agreement.generateSecret(), "HmacSHA256"));
-        byte[] token = mac.doFinal(("TVLink file token v2:" + clientKey + ":" + serverKey)
+        byte[] token = mac.doFinal(("TVLink file token v2:" + clientKey + ":" + serverKey + ":" + binding)
                 .getBytes(StandardCharsets.US_ASCII));
-        byte[] code = mac.doFinal(("TVLink file confirmation v2:" + clientKey + ":" + serverKey)
+        byte[] code = mac.doFinal(("TVLink file confirmation v2:" + clientKey + ":" + serverKey + ":" + binding)
                 .getBytes(StandardCharsets.US_ASCII));
         int number = (java.nio.ByteBuffer.wrap(code).getInt() & Integer.MAX_VALUE) % 1000000;
         return new Result(encode(token), String.format(Locale.ROOT, "%06d", number));

@@ -25,7 +25,11 @@ final class RemoteIdentity {
 
     // The identity is private to the app and excluded from Android backup.
     static synchronized KeyStore load(File directory) throws Exception {
-        File file = new File(directory, "android-tv-remote.p12");
+        return load(directory, "android-tv-remote.p12");
+    }
+
+    static synchronized KeyStore load(File directory, String filename) throws Exception {
+        File file = new File(directory, filename);
         KeyStore store = KeyStore.getInstance("PKCS12");
         if (file.exists()) {
             try (FileInputStream input = new FileInputStream(file)) {

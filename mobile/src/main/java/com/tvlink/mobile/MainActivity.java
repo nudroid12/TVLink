@@ -199,7 +199,7 @@ public class MainActivity extends Activity {
     private void startReceiver() {
         if (receiver != null || !hasFilePairing()) return;
         try {
-            receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
+            receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
         } catch (IOException error) {
             notifyUser("Cannot start receiver: " + error.getMessage());
         }

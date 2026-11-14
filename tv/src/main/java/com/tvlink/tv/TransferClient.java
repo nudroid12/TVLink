@@ -6,14 +6,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class TransferClient implements AutoCloseable {
-    private final Socket socket = new Socket();
+    private final Socket socket;
+    private final String binding;
     private final DataInputStream in;
     private final DataOutputStream out;
 
     TransferClient(String host, String operation, String credential) throws IOException {
+        Socket raw = new Socket();
         try {
-            socket.connect(new InetSocketAddress(host, 47832), 5000);
-            socket.setSoTimeout(15000);
+            raw.connect(new InetSocketAddress(host, 47832), 5000);
+            javax.net.ssl.SSLSocket encrypted = TransferTls.wrap(TransferTls.client(), raw, true);
+            socket = encrypted;
+            binding = TransferTls.binding(encrypted, true);
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
             out.writeUTF(operation);
@@ -24,14 +28,14 @@ final class TransferClient implements AutoCloseable {
                 out.writeUTF(clientNonce);
                 out.flush();
                 expect("AUTH");
-                if (!LinkNetwork.matches(LinkNetwork.sign(credential, "server", clientNonce), in.readUTF())) {
+                if (!LinkNetwork.matches(LinkNetwork.sign(credential, "tls-server:" + operation, binding + ":" + clientNonce), in.readUTF())) {
                     throw new IOException("Device link did not match");
                 }
-                out.writeUTF(LinkNetwork.sign(credential, operation, in.readUTF()));
+                out.writeUTF(LinkNetwork.sign(credential, "tls-client:" + operation, binding + ":" + in.readUTF()));
             }
             out.flush();
-        } catch (IOException error) {
-            socket.close();
+        } catch (IOException | RuntimeException error) {
+            raw.close();
             throw error;
         }
     }
