@@ -26,6 +26,10 @@ public class MainActivity extends Activity {
     private Button homePair;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
             (prefs, key) -> {
+                if ("link_token".equals(key) && this.started) {
+                    if (hasFilePairing()) startReceiver();
+                    else closeReceiver();
+                }
                 if ("peer_name".equals(key) || "remote_name".equals(key)) {
                     if (showingHome && homePair != null && hasRemotePairing()) {
                         homePair.setText(linkedTvName());
@@ -223,7 +227,7 @@ public class MainActivity extends Activity {
     }
 
     private void startReceiver() {
-        if (receiver != null || !hasFilePairing()) return;
+        if (!started || receiver != null || !hasFilePairing()) return;
         try {
             receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE));
         } catch (IOException error) {

@@ -21,12 +21,17 @@ public final class ReceivedFileProvider extends ContentProvider {
                 && ReleaseCheck.UPDATE_FILE.equals(uri.getLastPathSegment())) {
             return new File(getContext().getCacheDir(), ReleaseCheck.UPDATE_FILE);
         }
+        if (uri.getPathSegments().size() == 2 && "storage".equals(uri.getPathSegments().get(0))) {
+            File file = new File(uri.getLastPathSegment());
+            if (file.isFile() && TvSettings.canBrowse(getContext(), file)) return file;
+            throw new IOException("Invalid storage file");
+        }
         if (uri.getPathSegments().size() != 1) throw new IOException("Invalid URI");
         return TransferServer.file(TvSettings.directory(getContext()), uri.getLastPathSegment());
     }
 
     @Override public String getType(Uri uri) {
-        String name = uri.getLastPathSegment();
+        String name = new File(uri.getLastPathSegment() == null ? "" : uri.getLastPathSegment()).getName();
         if (ReleaseCheck.UPDATE_FILE.equals(name)) return "application/vnd.android.package-archive";
         int dot = name == null ? -1 : name.lastIndexOf('.');
         String mime = dot < 0 ? null : MimeTypeMap.getSingleton().getMimeTypeFromExtension(

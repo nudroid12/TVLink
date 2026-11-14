@@ -40,6 +40,7 @@ public class MainActivity extends Activity {
         page.setBackgroundColor(0xff060f25);
         deviceCardName = null;
         deviceCard = null;
+        storageFolder = null;
         setContentView(page);
         return page;
     }
@@ -61,13 +62,18 @@ public class MainActivity extends Activity {
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
 
+    private android.content.res.ColorStateList focusText(int normal) {
+        return new android.content.res.ColorStateList(
+                new int[][] {{android.R.attr.state_focused}, {}}, new int[] {0xff0c1c35, normal});
+    }
+
     private void styleRowText(TextView text) {
-        text.setTextColor(Color.WHITE);
+        text.setTextColor(focusText(Color.WHITE));
         text.setTextSize(18);
         text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
     }
@@ -79,11 +85,11 @@ public class MainActivity extends Activity {
     private Button styleButton(Button button, String title, Runnable action, boolean primary) {
         button.setText(title);
         button.setAllCaps(false);
-        button.setTextColor(primary ? 0xff0c1c35 : Color.WHITE);
+        button.setTextColor(focusText(primary ? 0xff0c1c35 : Color.WHITE));
         button.setTextSize(18);
         button.setGravity(Gravity.CENTER);
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(primary ? FOCUS_BLUE : 0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
         background.addState(new int[] {}, tile(primary ? 0xff9ac2ff : 0xff1b2740, false));
         button.setBackground(background);
         button.setOnClickListener(view -> action.run());
@@ -201,7 +207,7 @@ public class MainActivity extends Activity {
         if ("My Files".equals(title)) {
             Button sort = button("Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
                 newestFirst = !newestFirst;
-                showFiles();
+                renderFiles();
             });
             sort.setBackground(flatRowBackground());
             styleRowText(sort);
@@ -686,7 +692,13 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             if (!session.cancelled) session.dialog.setMessage("Finding linked device…");
         });
-        String address = LinkNetwork.resolve(host, token);
+        String address;
+        try {
+            address = LinkNetwork.resolve(host, token);
+        } catch (IOException error) {
+            throw new IOException("On your phone, open TVLink → Send / Receive and check that it says Ready to receive.\n\n"
+                    + error.getMessage(), error);
+        }
         if (session.cancelled) throw new IOException("Transfer cancelled");
         try (TransferClient client = new TransferClient(address, "SEND", token, session.socket)) {
             client.send(name, size, stream, percent -> runOnUiThread(() -> {
@@ -737,12 +749,55 @@ public class MainActivity extends Activity {
     }
 
     private boolean newestFirst = true;
+    private File storageRoot;
+    private File storageFolder;
+
+    private void browseStorage() {
+        if (!TvSettings.hasStorageAccess(this)) {
+            new AlertDialog.Builder(this).setTitle("Storage access").setMessage("Allow storage access to browse files on the TV.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Allow", (dialog, which) -> requestStorageAccess()).show();
+            return;
+        }
+        java.util.List<File> roots = TvSettings.storageRoots(this);
+        if (roots.isEmpty()) {
+            notifyUser("No accessible storage found.");
+            return;
+        }
+        String[] labels = new String[roots.size()];
+        for (int i = 0; i < roots.size(); i++) {
+            labels[i] = i == 0 ? "Internal storage" : "External storage · " + roots.get(i).getName();
+        }
+        new AlertDialog.Builder(this).setTitle("Browse storage").setItems(labels, (dialog, index) -> {
+            storageRoot = roots.get(index);
+            storageFolder = storageRoot;
+            renderFiles();
+        }).setNegativeButton("Cancel", null).show();
+    }
+
 
     private void showFiles() {
+        storageRoot = null;
+        storageFolder = null;
+        renderFiles();
+    }
+
+    private void renderFiles() {
+        File folderToRender = storageFolder;
         LinearLayout body = feature("My Files");
-        File[] files = received().listFiles(f -> f.isFile() && !f.getName().startsWith("."));
+        storageFolder = folderToRender;
+        boolean browsing = storageFolder != null;
+        Button browse = button(browsing ? "Received files" : "Browse storage",
+                browsing ? this::showFiles : this::browseStorage);
+        body.addView(browse, new LinearLayout.LayoutParams(dp(208), dp(44)));
+        if (browsing) info(body, storageFolder.getAbsolutePath());
+        File folder = browsing ? storageFolder : received();
+        File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
+                && (browsing ? TvSettings.canBrowse(this, file) : file.isFile()));
         if (files == null || files.length == 0) {
-            info(body, "No files received yet");
+            info(body, files == null && browsing ? "Cannot read this folder."
+                    : browsing ? "This folder is empty." : "No files received yet");
+            browse.requestFocus();
             return;
         }
         java.util.Comparator<File> byName = java.util.Comparator.comparing(File::getName,
@@ -750,8 +805,9 @@ public class MainActivity extends Activity {
         java.util.Arrays.sort(files, newestFirst
                 ? java.util.Comparator.comparingLong(File::lastModified).reversed().thenComparing(byName)
                 : byName);
+        if (browsing) java.util.Arrays.sort(files, java.util.Comparator.comparing(File::isFile));
         for (File file : files) addFileRow(body, file);
-        body.getChildAt(0).requestFocus();
+        body.getChildAt(browsing ? 2 : 1).requestFocus();
     }
 
     private void addFileRow(LinearLayout body, File file) {
@@ -759,11 +815,31 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), 0, dp(16), 0);
         row.setFocusable(true);
-        row.setOnClickListener(view -> fileActions(file, view));
+        row.setOnClickListener(view -> {
+            if (file.isDirectory()) {
+                storageFolder = file;
+                renderFiles();
+            } else {
+                fileActions(file, view);
+            }
+        });
         row.setBackground(flatRowBackground());
+        row.setOnFocusChangeListener((view, focused) -> {
+            int color = focused ? 0xff0c1c35 : Color.WHITE;
+            for (int i = 0; i < row.getChildCount(); i++) {
+                android.view.View child = row.getChildAt(i);
+                if (child instanceof TextView) ((TextView) child).setTextColor(color);
+                if (child instanceof LinearLayout) {
+                    LinearLayout labels = (LinearLayout) child;
+                    for (int j = 0; j < labels.getChildCount(); j++) {
+                        ((TextView) labels.getChildAt(j)).setTextColor(color);
+                    }
+                }
+            }
+        });
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_document);
+        icon.setImageResource(file.isDirectory() ? R.drawable.ic_files : R.drawable.ic_document);
         String filename = file.getName();
         if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
             String path = file.getAbsolutePath();
@@ -793,7 +869,7 @@ public class MainActivity extends Activity {
         styleRowText(name);
         labels.addView(name);
         TextView size = new TextView(this);
-        size.setText(android.text.format.Formatter.formatShortFileSize(this, file.length()));
+        size.setText(file.isDirectory() ? "Folder" : android.text.format.Formatter.formatShortFileSize(this, file.length()));
         styleRowText(size);
         labels.addView(size);
         TextView date = new TextView(this);
@@ -850,7 +926,7 @@ public class MainActivity extends Activity {
                         .setMessage(filename).setNegativeButton("Cancel", null)
                         .setPositiveButton("Delete", (confirm, which) -> {
                             if (!file.delete()) notifyUser("Could not delete file");
-                            showFiles();
+                            renderFiles();
                         }).show());
 
         dialog.show();
@@ -873,12 +949,12 @@ public class MainActivity extends Activity {
             action.run();
         });
         row.setBackground(flatRowBackground());
-        row.setTextColor(color);
+        row.setTextColor(focusText(color));
         row.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), 0, dp(14), 0);
         row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
-        row.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(color));
+        row.setCompoundDrawableTintList(focusText(color));
         row.setCompoundDrawablePadding(dp(14));
         panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
         return row;
@@ -892,14 +968,15 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", (d, choice) -> {
                     try {
-                        File target = TransferServer.file(received(), input.getText().toString().trim());
+                        File folder = file.getParentFile();
+                        File target = TransferServer.file(folder, input.getText().toString().trim());
                         if (!target.equals(file)) {
-                            synchronized (received().getAbsolutePath().intern()) {
+                            synchronized (folder.getAbsolutePath().intern()) {
                                 if (target.exists() || !file.renameTo(target)) throw new IOException("Cannot rename file");
                             }
                         }
                     } catch (IOException error) { notifyUser(error.getMessage()); }
-                    showFiles();
+                    renderFiles();
                 }).show();
     }
 
@@ -911,8 +988,10 @@ public class MainActivity extends Activity {
                         android.net.Uri.parse("package:" + getPackageName())));
                 return;
             }
-            android.net.Uri uri = new android.net.Uri.Builder().scheme("content")
-                    .authority("com.tvlink.tv.files").appendPath(file.getName()).build();
+            android.net.Uri.Builder builder = new android.net.Uri.Builder().scheme("content")
+                    .authority("com.tvlink.tv.files");
+            android.net.Uri uri = storageFolder == null ? builder.appendPath(file.getName()).build()
+                    : builder.appendPath("storage").appendPath(file.getAbsolutePath()).build();
             String type = apk ? "application/vnd.android.package-archive" : getContentResolver().getType(uri);
             startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
@@ -980,6 +1059,12 @@ public class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (showingHome) super.onBackPressed();
-        else home();
+        else if (storageFolder != null) {
+            if (storageFolder.equals(storageRoot)) showFiles();
+            else {
+                storageFolder = storageFolder.getParentFile();
+                renderFiles();
+            }
+        } else home();
     }
 }

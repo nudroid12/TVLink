@@ -1,5 +1,13 @@
 <resources>
     <style name="TVLinkTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:colorAccent">#7FB1FE</item>
+        <item name="android:alertDialogTheme">@style/TVLinkTvDialog</item>
+    </style>
+    <style name="TVLinkTvDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/tv_dialog_panel</item>
+        <item name="android:colorBackground">#1B2740</item>
+        <item name="android:colorAccent">#7FB1FE</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#D6E0F2</item>
     </style>
 </resources>

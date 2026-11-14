@@ -21,7 +21,7 @@ final class TransferServer implements AutoCloseable {
         this.folder = folder;
         this.identityDirectory = identityDirectory;
         this.settings = settings;
-        if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Cannot create file folder");
+        if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) throw new IOException("Cannot create file folder");
         server = new ServerSocket();
         try {
             server.setReuseAddress(true);
