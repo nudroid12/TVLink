@@ -116,6 +116,7 @@ final class TransferServer implements AutoCloseable {
                         for (File f : files) out.writeUTF(f.getName());
                         break;
                     case "SEND":
+                        if (!settings.getBoolean("receive", true)) throw new IOException("Receive Transfers is disabled");
                         receive(in, out);
                         break;
                     case "DELETE":
@@ -125,7 +126,7 @@ final class TransferServer implements AutoCloseable {
                     case "RENAME":
                         File source = file(folder, in.readUTF());
                         File target = file(folder, in.readUTF());
-                        synchronized (folder.getParentFile().getAbsolutePath().intern()) {
+                        synchronized (folder.getAbsolutePath().intern()) {
                             if (target.exists() || !source.renameTo(target)) throw new IOException("Cannot rename file");
                         }
                         out.writeUTF("OK");
@@ -146,7 +147,10 @@ final class TransferServer implements AutoCloseable {
         if (remaining < 0 || remaining > LIMIT || remaining > folder.getUsableSpace()) {
             throw new IOException("File size unavailable, too large or insufficient TV storage");
         }
-        if (target.exists()) throw new IOException("A file with this name already exists");
+        boolean overwrite = settings.getBoolean("overwrite", false);
+        if (target.exists() && (!overwrite || !target.isFile())) {
+            throw new IOException("A file with this name already exists");
+        }
         File temporary = File.createTempFile(".upload-", ".part", folder);
         try {
             out.writeUTF("READY");
@@ -160,8 +164,12 @@ final class TransferServer implements AutoCloseable {
                     remaining -= count;
                 }
             }
-            synchronized (folder.getParentFile().getAbsolutePath().intern()) {
-                if (target.exists() || !temporary.renameTo(target)) throw new IOException("Cannot save file");
+            synchronized (folder.getAbsolutePath().intern()) {
+                if (target.exists() && (!overwrite || !target.isFile())) throw new IOException("Cannot save file");
+                if (!settings.getBoolean("modify_date", true) && target.isFile()) {
+                    temporary.setLastModified(target.lastModified());
+                }
+                if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
             }
             out.writeUTF("OK");
         } finally {

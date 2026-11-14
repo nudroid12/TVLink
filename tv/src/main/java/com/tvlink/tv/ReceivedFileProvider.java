@@ -18,7 +18,7 @@ public final class ReceivedFileProvider extends ContentProvider {
 
     private File resolve(Uri uri) throws IOException {
         if (uri.getPathSegments().size() != 1) throw new IOException("Invalid URI");
-        return TransferServer.file(new File(getContext().getFilesDir(), "received"), uri.getLastPathSegment());
+        return TransferServer.file(TvSettings.directory(getContext()), uri.getLastPathSegment());
     }
 
     @Override public String getType(Uri uri) {
