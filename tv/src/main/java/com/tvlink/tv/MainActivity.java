@@ -160,7 +160,9 @@ public class MainActivity extends Activity {
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
         Button pair = button(isLinked() ? peerName() : "Pair", this::showLinkStatus);
         pairedHeader = pair;
-        pair.setCompoundDrawablePadding(dp(8));
+        pair.setMinWidth(0);
+        pair.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        pair.setCompoundDrawablePadding(dp(6));
         pair.setPadding(dp(12), 0, dp(12), 0);
         updateDeviceLabels();
         pair.setMaxWidth(dp(280));
@@ -349,7 +351,7 @@ public class MainActivity extends Activity {
 
     private void divider(LinearLayout page) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(0xff303c56);
+        line.setBackgroundColor(0xff82aaff);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);

@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
         toggle(rows, "Launch at startup", "Open TVLink at boot where supported by the device", "startup", false);
         toggle(rows, "Overwrite", "Replace an existing file with the same name", "overwrite", false);
         toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
-        setting(rows, "Receive Files", "Open this phone’s Wi-Fi receiver", this::receiveFiles);
+        setting(rows, "Receive Files", "View incoming transfers", this::showTransfers);
     }
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
@@ -204,7 +204,7 @@ public class MainActivity extends Activity {
 
     private void divider(LinearLayout page) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(0xff303c56);
+        line.setBackgroundColor(REMOTE_OUTLINE);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -231,19 +231,20 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void receiveFiles() {
-        LinearLayout body = feature("Receive Files");
+    private void showTransfers() {
+        LinearLayout body = feature("Send / Receive");
         if (!hasFilePairing()) {
-            body.addView(button("Pair TV", () -> pairSystemRemote(this::receiveFiles)));
-        } else if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
-            info(body, "Receive Transfers is disabled in Settings.");
+            body.addView(button("Pair TV", () -> pairSystemRemote(this::showTransfers)));
         } else {
-            startReceiver();
-            info(body, receiver == null ? "Could not start receiver." : "Ready to receive from your linked TV.");
+            body.addView(button("Choose file to send", this::chooseFileToSend));
+            if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+                info(body, "Receive Transfers is disabled in Settings.");
+            } else {
+                startReceiver();
+                info(body, receiver == null ? "Could not start receiver." : "Ready to receive from " + linkedTvName() + ".");
+            }
         }
-        body.addView(button("Received files", this::showLocalFiles));
-        TextView transfers = info(body, "");
-        renderTransfers(transfers);
+        renderTransfers(info(body, ""));
     }
 
     private void home() {
@@ -259,27 +260,25 @@ public class MainActivity extends Activity {
         wordmark.setScaleType(ImageView.ScaleType.FIT_CENTER);
         wordmark.setContentDescription("TVLink");
         boolean linked = hasRemotePairing();
-        LinearLayout.LayoutParams logoSize = linked
-                ? new LinearLayout.LayoutParams(0, dp(52), 2)
-                : new LinearLayout.LayoutParams(dp(TV ? 154 : 116), dp(52));
-        header.addView(wordmark, logoSize);
-        if (!linked) {
-            header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        }
+        int screenWidth = getResources().getConfiguration().screenWidthDp;
+        int logoWidth = Math.max(64, Math.min(116, screenWidth / 3));
+        header.addView(wordmark, new LinearLayout.LayoutParams(dp(logoWidth), dp(52)));
+        header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
 
         Button pair = button(linked ? linkedTvName() : "Pair", this::showDevice);
         homePair = pair;
+        pair.setMinHeight(dp(48));
+        pair.setMinWidth(0);
+        pair.setMaxWidth(dp(Math.max(48, screenWidth - logoWidth - 112)));
+        pair.setPadding(dp(10), dp(6), dp(10), dp(6));
         if (linked) {
+            pair.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             pair.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_tv, 0, 0, 0);
             pair.setCompoundDrawablePadding(dp(6));
-            pair.setPadding(dp(8), dp(6), dp(8), dp(6));
-            pair.setMinHeight(dp(48));
-            LinearLayout.LayoutParams linkedSize = new LinearLayout.LayoutParams(0, -2, 3);
-            linkedSize.setMarginStart(dp(8));
-            header.addView(pair, linkedSize);
-        } else {
-            header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
         }
+        LinearLayout.LayoutParams pairSize = new LinearLayout.LayoutParams(-2, -2);
+        pairSize.setMarginStart(dp(8));
+        header.addView(pair, pairSize);
         Button settings = button("", this::showSettings);
         settings.setContentDescription("Settings");
         settings.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_settings, 0, 0, 0);
@@ -289,7 +288,7 @@ public class MainActivity extends Activity {
         header.addView(settings, settingsSize);
 
         android.view.View divider = new android.view.View(this);
-        divider.setBackgroundColor(0xff303c56);
+        divider.setBackgroundColor(REMOTE_OUTLINE);
         LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(-1, dp(1));
         line.setMargins(0, dp(14), 0, dp(18));
         page.addView(divider, line);
@@ -301,23 +300,54 @@ public class MainActivity extends Activity {
         cards.setFillViewport(true);
         page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
         cards.addView(menu);
-        String[] titles = {"Send", "Remote", "Files"};
-        Runnable[] actions = {this::openSend, this::openRemote, this::showFiles};
-        int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
-        for (int index = 0; index < titles.length; index++) {
-            String title = titles[index];
-            Button item = button(title, actions[index]);
-            item.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
-            item.setCompoundDrawablePadding(dp(8));
-            item.setPadding(dp(2), dp(10), dp(2), dp(10));
-            item.setSingleLine(true);
-            item.setTextSize(16);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(144));
-            params.setMarginStart(dp(20));
-            params.setMarginEnd(dp(20));
-            if (index > 0) params.topMargin = dp(24);
-            menu.addView(item, params);
-        }
+        addHomeCard(menu, "Send / Receive", R.drawable.ic_send, this::showTransfers);
+        addHomeCard(menu, "Remote", R.drawable.ic_remote, this::openRemote);
+        addHomeCard(menu, "Files", R.drawable.ic_files, this::showFiles);
+    }
+
+    private void addHomeCard(LinearLayout menu, String title, int iconResource, Runnable action) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(12), dp(12), dp(12), dp(12));
+        card.setMinimumHeight(dp(144));
+        card.setFocusable(true);
+        card.setOnClickListener(view -> action.run());
+        card.setContentDescription(title);
+        card.setAccessibilityDelegate(new android.view.View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(android.view.View host,
+                    android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(Button.class.getName());
+            }
+        });
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        background.addState(new int[] {}, tile(0xff1b2740, false));
+        card.setBackground(background);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconResource);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        card.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+
+        TextView label = new TextView(this);
+        label.setText(title);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(16);
+        label.setGravity(Gravity.CENTER);
+        label.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams labelSize = new LinearLayout.LayoutParams(-1, -2);
+        labelSize.topMargin = dp(10);
+        card.addView(label, labelSize);
+
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2);
+        size.setMarginStart(dp(20));
+        size.setMarginEnd(dp(20));
+        if (menu.getChildCount() > 0) size.topMargin = dp(24);
+        menu.addView(card, size);
     }
 
     private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -326,7 +356,7 @@ public class MainActivity extends Activity {
     private LinearLayout feature(String title) {
         showingHome = false;
         LinearLayout page = screen(title);
-        if (!"Send".equals(title) && !"My Files".equals(title) && !"Device".equals(title)) {
+        if (!"Send / Receive".equals(title) && !"My Files".equals(title) && !"Device".equals(title)) {
             page.addView(button("Back", this::home));
         }
         ScrollView scroll = new ScrollView(this);
@@ -461,21 +491,9 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void openSend() {
-        if (hasFilePairing()) showSend();
-        else pairSystemRemote(this::showSend);
-    }
-
     private void openRemote() {
         if (hasRemotePairing()) showRemote();
         else pairSystemRemote(this::showRemote, false);
-    }
-
-    private void showSend() {
-        LinearLayout body = feature("Send");
-        body.addView(button("Choose file to send", this::chooseFileToSend));
-        body.addView(button("Received files", this::showLocalFiles));
-        renderTransfers(info(body, ""));
     }
 
     private void chooseFileToSend() {
@@ -903,28 +921,19 @@ public class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
-        header.addView(remoteIcon("left", "Close Remote", this::home, false, 24, false),
-                new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = new TextView(this);
         title.setText("Remote");
         title.setTextSize(26);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setTextColor(REMOTE_BLUE);
         title.setGravity(Gravity.CENTER);
-        header.addView(title, new LinearLayout.LayoutParams(0, -1, 1));
-        header.addView(new android.view.View(this), new LinearLayout.LayoutParams(dp(48), 1));
+        header.addView(title, new LinearLayout.LayoutParams(-1, -1));
 
         TextView status = info(page, "Connecting…");
         status.setGravity(Gravity.CENTER);
         status.setTextColor(REMOTE_BLUE);
         status.setMaxLines(2);
         remoteStatus = status;
-        Button reconnect = button("Reconnect", () -> connectRemoteScreen(status));
-        reconnect.setTextColor(REMOTE_NAVY);
-        reconnect.setBackground(remoteBackground(REMOTE_BLUE, 0, 24));
-        LinearLayout.LayoutParams reconnectSize = new LinearLayout.LayoutParams(dp(144), dp(44));
-        reconnectSize.gravity = Gravity.CENTER;
-        page.addView(reconnect, reconnectSize);
         status.setOnClickListener(view -> showDevice());
         status.setContentDescription("Connection status. Tap for paired device options.");
 
@@ -934,7 +943,7 @@ public class MainActivity extends Activity {
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setGravity(Gravity.CENTER);
-        controls.setPadding(0, dp(16), 0, dp(8));
+        controls.setPadding(0, dp(12), 0, dp(40));
         scroll.addView(controls, new ScrollView.LayoutParams(-1, -2));
         controls.addView(remoteKey("power", "Power", 26, false, 24),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -1322,6 +1331,10 @@ public class MainActivity extends Activity {
         }
 
         void failed(String title, Exception error, Runnable retry) {
+            failed(title, error, "Try again", retry);
+        }
+
+        void failed(String title, Exception error, String retryLabel, Runnable retry) {
             String detail = error.getMessage();
             step("Failed: " + (detail == null ? error.getClass().getSimpleName() : detail));
             dismiss();
@@ -1329,7 +1342,7 @@ public class MainActivity extends Activity {
                     .setTitle(title).setMessage(entries.toString())
                     .setNegativeButton("Close", null)
                     .setNeutralButton("Copy log", null)
-                    .setPositiveButton("Try again", (d, w) -> retry.run()).show()
+                    .setPositiveButton(retryLabel, (d, w) -> retry.run()).show()
                     .getButton(BUTTON_NEUTRAL).setOnClickListener(view -> copyLog());
         }
     }
@@ -1454,7 +1467,9 @@ public class MainActivity extends Activity {
     private void connectRemoteScreen(TextView status) {
         if (remoteConnecting || remotePairing) return;
         remoteConnecting = true;
-        PairingLog progress = pairingProgress("Opening Remote session…");
+        status.setText(linkedTvName() + " · Connecting…");
+        PairingLog progress = new PairingLog();
+        progress.step("Opening Remote session…");
         remoteIo.execute(() -> {
             Exception failure = null;
             try {
@@ -1466,13 +1481,13 @@ public class MainActivity extends Activity {
             Exception result = failure;
             runOnUiThread(() -> {
                 remoteConnecting = false;
-                progress.dismiss();
                 if (isFinishing() || isDestroyed() || remoteStatus != status) return;
                 if (result == null) {
                     status.setText(linkedTvName() + " · Connected");
                 } else {
                     status.setText(linkedTvName() + " · Disconnected");
-                    progress.failed("Remote disconnected", result, () -> connectRemoteScreen(status));
+                    progress.failed("Remote disconnected", result, "Reconnect",
+                            () -> connectRemoteScreen(status));
                 }
             });
         });
@@ -1482,14 +1497,20 @@ public class MainActivity extends Activity {
         if (remotePairing || remoteConnecting || remoteStatus == null) return;
         TextView status = remoteStatus;
         remoteIo.execute(() -> {
+            java.util.List<String> messages = new java.util.ArrayList<>();
             try {
-                ensureRemote(message -> runOnUiThread(() -> status.setText(message)));
+                ensureRemote(messages::add);
                 remoteConnection.key(key);
-                runOnUiThread(() -> status.setText("Remote connected · Key sent"));
             } catch (Exception error) {
                 closeSystemRemote();
-                String detail = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
-                runOnUiThread(() -> status.setText("Remote disconnected: " + detail));
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || remoteStatus != status || remoteConnecting) return;
+                    if ("Remote disconnected".contentEquals(status.getText())) return;
+                    status.setText("Remote disconnected");
+                    PairingLog log = new PairingLog();
+                    for (String message : messages) log.step(message);
+                    log.failed("Remote disconnected", error, "Reconnect", () -> connectRemoteScreen(status));
+                });
             }
         });
     }
