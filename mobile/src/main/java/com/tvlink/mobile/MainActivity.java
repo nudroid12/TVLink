@@ -330,21 +330,23 @@ public class MainActivity extends Activity {
             }
         });
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
-        background.addState(new int[] {}, tile(0xff1b2740, false));
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
+        background.addState(new int[] {}, tile(REMOTE_BLUE, false));
         card.setBackground(background);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(iconResource);
+        icon.setColorFilter(REMOTE_NAVY);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        card.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        card.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         TextView label = new TextView(this);
         label.setText(title);
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(16);
+        label.setTextColor(REMOTE_NAVY);
+        label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        label.setTextSize(18);
         label.setGravity(Gravity.CENTER);
         label.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams labelSize = new LinearLayout.LayoutParams(-1, -2);
@@ -720,25 +722,13 @@ public class MainActivity extends Activity {
     }
 
     private boolean newestFilesFirst = true;
+    private LinearLayout currentTvFiles;
 
     private void showLocalFiles() {
-        LinearLayout body = feature("My Files");
-        LinearLayout toolbar = new LinearLayout(this);
-        toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        body.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
-        addFileToolbarAction(toolbar, "Files on TV", () -> {
-            if (hasFilePairing()) showTvFiles();
-            else pairSystemRemote(this::showTvFiles);
-        });
-        addFileToolbarAction(toolbar, newestFilesFirst ? "Sort: Newest" : "Sort: Name", () -> {
-            newestFilesFirst = !newestFilesFirst;
-            showLocalFiles();
-        });
-        addFileToolbarAction(toolbar, "Refresh", this::showLocalFiles);
-        divider(body);
+        LinearLayout body = filesPage(false);
         File[] files = received().listFiles(file -> file.isFile() && !file.getName().startsWith("."));
         if (files == null || files.length == 0) {
-            info(body, "No files received yet");
+            showFilesEmptyState(body, "No files received yet");
             return;
         }
         java.util.Comparator<File> byName = java.util.Comparator.comparing(
@@ -749,14 +739,79 @@ public class MainActivity extends Activity {
         for (File file : files) addLocalFileRow(body, file);
     }
 
-    private void addFileToolbarAction(LinearLayout toolbar, String title, Runnable action) {
-        Button item = button(title, action);
-        item.setBackground(flatRowBackground());
-        item.setTextSize(14);
-        item.setMinWidth(0);
-        item.setMinHeight(dp(48));
-        item.setPadding(dp(4), dp(6), dp(4), dp(6));
-        toolbar.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+    private LinearLayout filesPage(boolean onTv) {
+        showingHome = false;
+        remoteStatus = null;
+        LinearLayout page = screen(null);
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
+        TextView title = new TextView(this);
+        title.setText("My Files");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(24);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        if (!onTv) {
+            addFileToolbarIcon(toolbar, R.drawable.ic_files_sort,
+                    newestFilesFirst ? "Sort: Newest" : "Sort: Name", () -> {
+                        newestFilesFirst = !newestFilesFirst;
+                        showLocalFiles();
+                    });
+        }
+        addFileToolbarIcon(toolbar, R.drawable.ic_files_refresh, "Refresh",
+                onTv ? this::showTvFiles : this::showLocalFiles);
+
+        LinearLayout tabs = new LinearLayout(this);
+        page.addView(tabs, new LinearLayout.LayoutParams(-1, -2));
+        addFileTab(tabs, "Received", !onTv, this::showLocalFiles);
+        addFileTab(tabs, "On TV", onTv, this::showTvFiles);
+        divider(page);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
+        currentTvFiles = onTv ? body : null;
+        return body;
+    }
+
+    private void addFileToolbarIcon(LinearLayout toolbar, int icon, String label, Runnable action) {
+        android.widget.ImageButton button = new android.widget.ImageButton(this);
+        button.setImageResource(icon);
+        button.setContentDescription(label);
+        button.setBackground(flatRowBackground());
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setOnClickListener(view -> action.run());
+        toolbar.addView(button, new LinearLayout.LayoutParams(dp(48), dp(48)));
+    }
+
+    private void addFileTab(LinearLayout tabs, String title, boolean selected, Runnable action) {
+        LinearLayout tab = new LinearLayout(this);
+        tab.setOrientation(LinearLayout.VERTICAL);
+        tabs.addView(tab, new LinearLayout.LayoutParams(0, -2, 1));
+        Button button = button(title, action);
+        button.setBackground(flatRowBackground());
+        button.setSelected(selected);
+        tab.addView(button, new LinearLayout.LayoutParams(-1, dp(48)));
+        android.view.View indicator = new android.view.View(this);
+        indicator.setBackgroundColor(selected ? FOCUS_BLUE : Color.TRANSPARENT);
+        LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(-1, dp(2));
+        line.setMarginStart(dp(16));
+        line.setMarginEnd(dp(16));
+        tab.addView(indicator, line);
+    }
+
+    private void showFilesEmptyState(LinearLayout body, String message) {
+        body.setGravity(Gravity.CENTER);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_files);
+        icon.setColorFilter(REMOTE_BLUE);
+        body.addView(icon, new LinearLayout.LayoutParams(dp(68), dp(68)));
+        TextView text = info(body, message);
+        text.setGravity(Gravity.CENTER);
     }
 
     private void addLocalFileRow(LinearLayout body, File file) {
@@ -782,7 +837,7 @@ public class MainActivity extends Activity {
         name.setText(file.getName());
         name.setTextSize(16);
         name.setTextColor(Color.WHITE);
-        name.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        
         name.setMaxLines(2);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         labels.addView(name);
@@ -924,16 +979,39 @@ public class MainActivity extends Activity {
     }
 
     private void showTvFiles() {
-        if (busy) return;
-        LinearLayout body = feature("Files on TV");
-        body.addView(button("Refresh", this::showTvFiles));
-        work(() -> {
+        if (isDestroyed()) return;
+        LinearLayout body = filesPage(true);
+        if (!hasFilePairing()) {
+            body.addView(button("Pair TV", () -> pairSystemRemote(this::showTvFiles)),
+                    new LinearLayout.LayoutParams(-2, dp(48)));
+            return;
+        }
+        TextView loading = info(body, "Loading files…");
+        io.execute(() -> {
             try (TransferClient client = client("LIST")) {
                 java.util.List<String> files = client.list();
                 java.util.Collections.sort(files, String.CASE_INSENSITIVE_ORDER);
                 runOnUiThread(() -> {
-                    if (files.isEmpty()) info(body, "No files received yet");
-                    for (String name : files) body.addView(button(name, () -> fileActions(name)));
+                    if (!body.isAttachedToWindow() || currentTvFiles != body) return;
+                    body.removeView(loading);
+                    if (files.isEmpty()) showFilesEmptyState(body, "No files on TV yet");
+                    for (String name : files) {
+                        Button row = button(name, () -> fileActions(name));
+                        row.setBackground(flatRowBackground());
+                        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                        row.setMinHeight(dp(56));
+                        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+                        row.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_document, 0, 0, 0);
+                        row.setCompoundDrawablePadding(dp(12));
+                        body.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                        divider(body);
+                    }
+                });
+            } catch (IOException error) {
+                runOnUiThread(() -> {
+                    if (body.isAttachedToWindow() && currentTvFiles == body) {
+                        loading.setText(error.getMessage() == null ? "Could not load files from TV" : error.getMessage());
+                    }
                 });
             }
         });
@@ -962,7 +1040,7 @@ public class MainActivity extends Activity {
         work(() -> {
             try (TransferClient client = client(operation)) { client.change(names); }
         }, () -> {
-            if (!showingHome) showTvFiles();
+            if (currentTvFiles != null && currentTvFiles.isAttachedToWindow()) showTvFiles();
         });
     }
 
@@ -1008,7 +1086,7 @@ public class MainActivity extends Activity {
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setGravity(Gravity.CENTER);
-        controls.setPadding(0, dp(12), 0, dp(40));
+        controls.setPadding(0, dp(12), 0, dp(88));
         scroll.addView(controls, new ScrollView.LayoutParams(-1, -2));
         controls.addView(remoteKey("power", "Power", 26, false, 24),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
