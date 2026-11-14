@@ -164,7 +164,7 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         layout.addView(row, new android.widget.FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
-        int size = Math.min(dp(170), Math.min((metrics.widthPixels - dp(68)) / 3,
+        int size = Math.min(dp(170), Math.min((metrics.widthPixels - dp(96)) / 3,
                 metrics.heightPixels - dp(152)));
         String[] titles = {"Receive", "Remote", "Files"};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
@@ -175,7 +175,7 @@ public class MainActivity extends Activity {
             card.setPadding(0, size / 4, 0, size / 7);
             if (index == 0) card.getCompoundDrawables()[1].setTint(0xff0c1c35);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
-            if (index > 0) params.setMarginStart(dp(10));
+            if (index > 0) params.setMarginStart(dp(24));
             row.addView(card, params);
             if (index == 0) card.requestFocus();
         }

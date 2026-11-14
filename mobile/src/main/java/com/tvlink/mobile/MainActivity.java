@@ -73,12 +73,188 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (android.content.pm.PackageManager.NameNotFoundException error) {
+            return "";
+        }
+    }
+
     private void showSettings() {
-        LinearLayout body = feature("Settings");
-        body.addView(button("Check for updates", () -> ReleaseCheck.check(this)));
+        showingHome = false;
+        LinearLayout page = screen(null);
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(toolbar);
+        Button back = button("‹", this::home);
+        back.setContentDescription("Back");
+        toolbar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView title = new TextView(this);
+        title.setText("Settings");
+        title.setTextSize(23);
+        title.setPadding(dp(12), 0, 0, 0);
+        toolbar.addView(title);
+        divider(page);
+        ScrollView scroll = new ScrollView(this);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(rows);
+        setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
+        setting(rows, "Device Name", LocalSettings.device(this), () -> editSetting("Device Name", "device_name", LocalSettings.device(this)));
+        setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
+        setting(rows, "Allow access all files", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Manage storage access", this::requestStorageAccess);
+        toggle(rows, "Receive Transfers", "Accept incoming transfers from other devices", "receive", true);
+        toggle(rows, "Launch at startup", "Open TVLink at boot where supported by the device", "startup", false);
+        toggle(rows, "Overwrite", "Replace an existing file with the same name", "overwrite", false);
+        toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
+        setting(rows, "Receive Files", "Open this phone’s Wi-Fi receiver", this::receiveFiles);
+    }
+
+    private void setting(LinearLayout rows, String title, String detail, Runnable action) {
+        Button item = button(title + "\n" + detail, action);
+        item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        item.setPadding(dp(14), dp(8), dp(14), dp(8));
+        rows.addView(item, new LinearLayout.LayoutParams(-1, dp(62)));
+        divider(rows);
+    }
+
+    private void toggle(LinearLayout rows, String title, String detail, String key, boolean fallback) {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        android.widget.CheckBox box = new android.widget.CheckBox(this);
+        box.setText(title + "\n" + detail);
+        box.setBackground(tile(0xff1b2740, false));
+        box.setPadding(dp(12), 0, dp(12), 0);
+        box.setChecked(prefs.getBoolean(key, fallback));
+        box.setOnFocusChangeListener((view, focused) -> box.setBackground(tile(focused ? 0xff263a5a : 0xff1b2740, focused)));
+        box.setOnCheckedChangeListener((view, checked) -> {
+            prefs.edit().putBoolean(key, checked).apply();
+
+        });
+        rows.addView(box, new LinearLayout.LayoutParams(-1, dp(62)));
+        divider(rows);
+    }
+
+    private void editSetting(String title, String key, String initial) {
+        EditText value = new EditText(this);
+        value.setSingleLine(true);
+        value.setText(initial);
+        new AlertDialog.Builder(this).setTitle(title).setView(value).setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    String input = value.getText().toString().trim();
+                    if (input.isEmpty() || input.length() > 40) {
+                        notifyUser("Enter a device name of 1–40 characters.");
+                        return;
+                    }
+                    getPreferences(MODE_PRIVATE).edit().putString(key, input).apply();
+                    showSettings();
+                }).show();
+    }
+
+    private void chooseDirectory() {
+        new AlertDialog.Builder(this).setTitle("Transfer Directory")
+                .setItems(new String[] {"TVLink app folder", "Downloads"}, (dialog, index) -> {
+                    if (index == 1 && !LocalSettings.hasStorageAccess(this)) {
+                        notifyUser("Allow storage access first, then choose Downloads.");
+                        return;
+                    }
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("downloads", index == 1).apply();
+                    showSettings();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void requestStorageAccess() {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:" + getPackageName())));
+            } catch (android.content.ActivityNotFoundException error) {
+                notifyUser("This phone does not expose the all-files access screen.");
+            }
+        } else {
+            requestPermissions(new String[] {android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 81);
+        }
+    }
+
+    private void divider(LinearLayout page) {
+        android.view.View line = new android.view.View(this);
+        line.setBackgroundColor(0xff303c56);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
+        params.setMargins(0, dp(8), 0, dp(8));
+        page.addView(line, params);
+    }
+
+    private TransferServer receiver;
+    private boolean receivingOnPhone;
+
+    private java.io.File received() {
+        return LocalSettings.directory(this);
+    }
+
+    private void closeReceiver() {
+        if (receiver != null) receiver.close();
+        receiver = null;
+    }
+
+    private void receiveFiles() {
+        LinearLayout body = feature("Receive Files");
+        receivingOnPhone = true;
+        if (!getPreferences(MODE_PRIVATE).getBoolean("receive", true)) {
+            info(body, "Receive Transfers is disabled in Settings.");
+            return;
+        }
+        try {
+            if (receiver == null) receiver = new TransferServer(received(), getPreferences(MODE_PRIVATE));
+        } catch (IOException error) {
+            info(body, "Cannot start receiver: " + error.getMessage());
+            return;
+        }
+        info(body, "IP address: " + localAddresses());
+        TextView code = info(body, "");
+        Runnable showCode = () -> {
+            String value = receiver.currentCode();
+            code.setText(value.isEmpty() ? "Paired. Ready to receive." : "Pairing code: " + value);
+        };
+        showCode.run();
+        body.addView(button("Refresh status", this::receiveFiles));
+        body.addView(button("New pairing code", () -> {
+            receiver.renewCode();
+            showCode.run();
+        }));
+        body.addView(button("Forget paired sender", () -> {
+            receiver.forgetPhone();
+            showCode.run();
+        }));
+        java.io.File[] files = received().listFiles(file -> file.isFile() && !file.getName().startsWith("."));
+        if (files != null && files.length > 0) {
+            info(body, "Received files");
+            java.util.Arrays.sort(files, java.util.Comparator.comparing(java.io.File::getName));
+            for (java.io.File file : files) info(body, file.getName());
+        }
+    }
+
+    private String localAddresses() {
+        java.util.List<String> addresses = new java.util.ArrayList<>();
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                java.net.NetworkInterface nic = interfaces.nextElement();
+                if (!nic.isUp() || nic.isLoopback()) continue;
+                java.util.Enumeration<java.net.InetAddress> list = nic.getInetAddresses();
+                while (list.hasMoreElements()) {
+                    java.net.InetAddress address = list.nextElement();
+                    if (address instanceof java.net.Inet4Address) addresses.add(address.getHostAddress());
+                }
+            }
+        } catch (IOException ignored) {}
+        return addresses.isEmpty() ? "Check network settings"
+                : android.text.TextUtils.join(" / ", addresses);
     }
 
     private void home() {
+        receivingOnPhone = false;
+        closeReceiver();
         showingHome = true;
         LinearLayout page = screen(null);
         LinearLayout header = new LinearLayout(this);
@@ -107,42 +283,26 @@ public class MainActivity extends Activity {
         page.addView(divider, line);
 
         LinearLayout menu = new LinearLayout(this);
-        menu.setOrientation(LinearLayout.HORIZONTAL);
-        page.addView(menu, new LinearLayout.LayoutParams(-1, -2));
+        menu.setOrientation(LinearLayout.VERTICAL);
+        ScrollView cards = new ScrollView(this);
+        page.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1));
+        cards.addView(menu);
         String[] titles = {"Send", "Remote", "Files"};
         Runnable[] actions = {this::openSend, this::openRemote, this::showFiles};
         int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
-        Button first = null;
         for (int index = 0; index < titles.length; index++) {
             String title = titles[index];
             boolean primary = index == 0;
-            Button item = styleButton(new MenuTile(), title, actions[index], primary);
+            Button item = styleButton(new Button(this), title, actions[index], primary);
             item.setCompoundDrawablesWithIntrinsicBounds(0, icons[index], 0, 0);
             item.setCompoundDrawablePadding(dp(8));
             item.setPadding(dp(2), dp(10), dp(2), dp(10));
             item.setSingleLine(true);
-            item.setTextSize(TV ? 20 : 14);
+            item.setTextSize(16);
             if (primary) item.getCompoundDrawables()[1].setTint(0xff0c1c35);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, TV ? dp(110) : -2, 1);
-            if (index > 0) params.setMarginStart(dp(8));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(100));
+            if (index > 0) params.topMargin = dp(12);
             menu.addView(item, params);
-            if (primary) first = item;
-        }
-        if (TV && first != null) first.requestFocus();
-    }
-
-    private final class MenuTile extends Button {
-        MenuTile() {
-            super(MainActivity.this);
-        }
-
-        @Override protected void onMeasure(int widthSpec, int heightSpec) {
-            if (!TV && android.view.View.MeasureSpec.getMode(widthSpec) == android.view.View.MeasureSpec.EXACTLY) {
-                int width = android.view.View.MeasureSpec.getSize(widthSpec);
-                heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(
-                        Math.max(dp(72), width), android.view.View.MeasureSpec.EXACTLY);
-            }
-            super.onMeasure(widthSpec, heightSpec);
         }
     }
 
@@ -262,14 +422,14 @@ public class MainActivity extends Activity {
         inputs.setOrientation(LinearLayout.VERTICAL);
         EditText host = new EditText(this);
         host.setSingleLine(true);
-        host.setHint("TV IPv4 address");
+        host.setHint("Receiver IPv4 address");
         host.setText(getPreferences(MODE_PRIVATE).getString("host", ""));
         EditText code = new EditText(this);
         code.setHint("Pairing code");
         code.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         inputs.addView(host);
         inputs.addView(code);
-        new AlertDialog.Builder(this).setTitle("Pair file transfer").setMessage("On the same Wi-Fi, open TVLink → Receive on your TV. Enter the IP and eight-digit code shown there.").setView(inputs)
+        new AlertDialog.Builder(this).setTitle("Pair file transfer").setMessage("On the same Wi-Fi, open Receive Files on the receiving device. Enter the IP and eight-digit code shown there.").setView(inputs)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", (dialog, which) -> {
                     String ip = host.getText().toString().trim();
@@ -511,6 +671,16 @@ public class MainActivity extends Activity {
         remoteConnection = null;
     }
 
+    @Override protected void onStop() {
+        closeReceiver();
+        super.onStop();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        if (receivingOnPhone) receiveFiles();
+    }
+
     @Override protected void onDestroy() {
         remoteIo.getQueue().clear();
         remoteIo.execute(this::closeSystemRemote);
@@ -521,6 +691,10 @@ public class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (showingHome) super.onBackPressed();
-        else home();
+        else if (receivingOnPhone) {
+            closeReceiver();
+            receivingOnPhone = false;
+            showSettings();
+        } else home();
     }
 }
