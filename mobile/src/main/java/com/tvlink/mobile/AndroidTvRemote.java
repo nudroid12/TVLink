@@ -1,7 +1,5 @@
 package com.tvlink.mobile;
 
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.security.*;
@@ -16,32 +14,22 @@ import javax.net.ssl.*;
 // Android TV Remote v2 wire format, cross-checked against tronikos/androidtvremote2.
 final class AndroidTvRemote implements AutoCloseable {
     private static final String LEGACY_ALIAS = "tvlink_android_tv_remote";
-    private static final String TLS_ALIAS = "tvlink_android_tv_remote_tls";
     private final SSLSocket socket;
     private final DataInputStream input;
     private final OutputStream output;
     private final X509Certificate identity;
     private volatile boolean closed;
 
-    AndroidTvRemote(String host, boolean pairing, String pin, boolean legacyIdentity) throws Exception {
-        KeyStore keys = KeyStore.getInstance("AndroidKeyStore");
-        keys.load(null);
-        // Existing certificates cannot have their authorized digests updated in place.
-        String alias = !pairing && legacyIdentity && keys.containsAlias(LEGACY_ALIAS)
-                ? LEGACY_ALIAS : TLS_ALIAS;
-        if (!keys.containsAlias(alias)) {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore");
-            generator.initialize(new KeyGenParameterSpec.Builder(alias,
-                    KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
-                    .setKeySize(2048)
-                    .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256,
-                            KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
-                    .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1,
-                            KeyProperties.SIGNATURE_PADDING_RSA_PSS).build());
-            generator.generateKeyPair();
-        }
+    AndroidTvRemote(File identityDirectory, String host, boolean pairing, String pin,
+                    boolean legacyIdentity) throws Exception {
+        KeyStore legacy = KeyStore.getInstance("AndroidKeyStore");
+        legacy.load(null);
+        String legacyAlias = LEGACY_ALIAS;
+        boolean useLegacy = !pairing && legacyIdentity && legacy.containsAlias(legacyAlias);
+        KeyStore keys = useLegacy ? legacy : RemoteIdentity.load(identityDirectory);
+        String alias = useLegacy ? legacyAlias : RemoteIdentity.ALIAS;
         identity = (X509Certificate) keys.getCertificate(alias);
-        PrivateKey key = (PrivateKey) keys.getKey(alias, null);
+        PrivateKey key = (PrivateKey) keys.getKey(alias, useLegacy ? null : RemoteIdentity.PASSWORD);
         X509KeyManager client = new X509ExtendedKeyManager() {
             public String[] getClientAliases(String type, Principal[] issuers) { return new String[] {alias}; }
             public String chooseClientAlias(String[] types, Principal[] issuers, java.net.Socket s) { return alias; }

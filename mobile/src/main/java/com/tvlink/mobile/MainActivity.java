@@ -565,7 +565,7 @@ public class MainActivity extends Activity {
                         // Try the system pairing flow if a saved remote connection no longer works.
                     }
                 }
-                pairing = new AndroidTvRemote(host, true, "", false);
+                pairing = new AndroidTvRemote(getNoBackupFilesDir(), host, true, "", false);
                 pairing.beginPairing();
                 AndroidTvRemote pending = pairing;
                 runOnUiThread(() -> enterRemoteCode(pending, host, paired));
@@ -638,7 +638,7 @@ public class MainActivity extends Activity {
         if (!confirmLink(host, token)) {
             AndroidTvRemote remote;
             try {
-                remote = new AndroidTvRemote(host, false, pin, legacyIdentity);
+                remote = new AndroidTvRemote(getNoBackupFilesDir(), host, false, pin, legacyIdentity);
                 try {
                     remote.start();
                 } catch (Exception error) {
@@ -733,7 +733,7 @@ public class MainActivity extends Activity {
     }
 
     private void startRemote(String host, String pin, boolean legacyIdentity) throws Exception {
-        remoteConnection = new AndroidTvRemote(host, false, pin, legacyIdentity);
+        remoteConnection = new AndroidTvRemote(getNoBackupFilesDir(), host, false, pin, legacyIdentity);
         remoteConnection.start();
     }
 
