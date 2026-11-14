@@ -24,6 +24,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) exportName = state.getString("export_name");
         home();
     }
 
@@ -101,7 +102,7 @@ public class MainActivity extends Activity {
         setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", LocalSettings.device(this), () -> editSetting("Device Name", "device_name", LocalSettings.device(this)));
         setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
-        setting(rows, "Allow access all files", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Manage storage access", this::requestStorageAccess);
+        setting(rows, "Direct Downloads access", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Optional for direct Downloads transfers", this::requestStorageAccess);
         toggle(rows, "Receive Transfers", "Accept incoming transfers from other devices", "receive", true);
         toggle(rows, "Launch at startup", "Open TVLink at boot where supported by the device", "startup", false);
         toggle(rows, "Overwrite", "Replace an existing file with the same name", "overwrite", false);
@@ -365,12 +366,19 @@ public class MainActivity extends Activity {
 
     private void showSend() {
         LinearLayout body = feature("Send");
-        body.addView(button("Choose file", () -> {
-            if (busy) return;
-            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*");
-            picker.addCategory(Intent.CATEGORY_OPENABLE);
+        body.addView(button("Choose file to send", this::chooseFileToSend));
+        body.addView(button("Received files", this::showLocalFiles));
+    }
+
+    private void chooseFileToSend() {
+        if (busy || activeSend != null) return;
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*");
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
             startActivityForResult(picker, 10);
-        }));
+        } catch (android.content.ActivityNotFoundException error) {
+            notifyUser("No file picker is available. Choose a file from Received Files.");
+        }
     }
 
     private TransferClient client(String operation) throws IOException {
@@ -381,8 +389,24 @@ public class MainActivity extends Activity {
         return new TransferClient(LinkNetwork.resolve(host, token), operation, token);
     }
 
+    private static final int EXPORT_FILE = 12;
+    private String exportName;
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString("export_name", exportName);
+    }
+
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_FILE) {
+            String name = exportName;
+            exportName = null;
+            if (result == RESULT_OK && name != null && data != null && data.getData() != null) {
+                exportCopy(name, data.getData());
+            }
+            return;
+        }
         if (request != 10 || result != RESULT_OK || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
         SendSession session = beginSend();
@@ -486,23 +510,125 @@ public class MainActivity extends Activity {
 
     private void showLocalFiles() {
         LinearLayout body = feature("Received Files");
+        if (hasFilePairing()) body.addView(button("Choose file to send", this::chooseFileToSend));
+        body.addView(button("Refresh", this::showLocalFiles));
         File[] files = received().listFiles(file -> file.isFile() && !file.getName().startsWith("."));
         if (files == null || files.length == 0) {
             info(body, "No files received yet");
             return;
         }
         java.util.Arrays.sort(files, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
-        for (File file : files) body.addView(button(file.getName(), () -> {
-            try {
-                android.net.Uri uri = new android.net.Uri.Builder().scheme("content")
-                        .authority(getPackageName() + ".received").appendPath(file.getName()).build();
-                String type = getContentResolver().getType(uri);
-                startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type == null ? "*/*" : type)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
-            } catch (RuntimeException error) {
-                notifyUser("No app can open this file");
+        for (File file : files) body.addView(button(file.getName(), () -> fileActions(file)));
+    }
+
+    private void fileActions(File file) {
+        boolean apk = file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
+        new AlertDialog.Builder(this).setTitle(file.getName()).setItems(new String[] {
+                apk ? "Install APK" : "Open",
+                "Rename", "Delete", "Send to TV", "Save a copy"
+        }, (d, choice) -> {
+            switch (choice) {
+                case 0: openFile(file, apk); break;
+                case 1: renameFile(file); break;
+                case 2:
+                    new AlertDialog.Builder(this).setTitle("Delete file?")
+                            .setMessage(file.getName()).setNegativeButton("Cancel", null)
+                            .setPositiveButton("Delete", (dialog, which) -> {
+                                if (!file.delete()) notifyUser("Could not delete file");
+                                showLocalFiles();
+                            }).show();
+                    break;
+                case 3: sendFile(file); break;
+                case 4: chooseExportLocation(file); break;
             }
-        }));
+        }).show();
+    }
+
+    private void chooseExportLocation(File file) {
+        Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream");
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.putExtra(Intent.EXTRA_TITLE, file.getName());
+        try {
+            exportName = file.getName();
+            startActivityForResult(picker, EXPORT_FILE);
+        } catch (android.content.ActivityNotFoundException error) {
+            exportName = null;
+            notifyUser("No document picker is available on this device.");
+        }
+    }
+
+    private void exportCopy(String name, android.net.Uri target) {
+        File folder = received();
+        io.execute(() -> {
+            try {
+                File source = TransferServer.file(folder, name);
+                try (InputStream in = new FileInputStream(source);
+                     OutputStream out = getContentResolver().openOutputStream(target, "wt")) {
+                    if (out == null) throw new IOException("Cannot write the selected document");
+                    byte[] buffer = new byte[65536];
+                    for (int count; (count = in.read(buffer)) != -1;) out.write(buffer, 0, count);
+                }
+                runOnUiThread(() -> notifyUser("Copy saved: " + name));
+            } catch (IOException | SecurityException error) {
+                runOnUiThread(() -> notifyUser("Could not save copy: " + error.getMessage()));
+            }
+        });
+    }
+
+    private void renameFile(File file) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(file.getName());
+        new AlertDialog.Builder(this).setTitle("Rename").setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (d, choice) -> {
+                    try {
+                        File target = TransferServer.file(received(), input.getText().toString().trim());
+                        if (!target.equals(file)) {
+                            synchronized (received().getAbsolutePath().intern()) {
+                                if (target.exists() || !file.renameTo(target)) throw new IOException("Cannot rename file");
+                            }
+                        }
+                    } catch (IOException error) { notifyUser(error.getMessage()); }
+                    showLocalFiles();
+                }).show();
+    }
+
+    private void openFile(File file, boolean apk) {
+        try {
+            if (apk && android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                notifyUser("Allow TVLink to install unknown apps, then select the APK again.");
+                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + getPackageName())));
+                return;
+            }
+            android.net.Uri uri = new android.net.Uri.Builder().scheme("content")
+                    .authority(getPackageName() + ".received").appendPath(file.getName()).build();
+            String type = apk ? "application/vnd.android.package-archive" : getContentResolver().getType(uri);
+            startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (android.content.ActivityNotFoundException | SecurityException error) {
+            notifyUser("No compatible app or installer available");
+        }
+    }
+
+    private void sendFile(File file) {
+        if (!hasFilePairing()) {
+            pairSystemRemote(() -> sendFile(file));
+            return;
+        }
+        SendSession session = beginSend();
+        if (session == null) return;
+        io.execute(() -> {
+            android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+            try (java.net.Socket socket = session.socket; FileInputStream stream = new FileInputStream(file)) {
+                sendToPeer(session, prefs.getString("remote_host", ""), prefs.getString("link_token", ""),
+                        file.getName(), stream.getChannel().size(), stream);
+                finishSend(session, "Sent: " + file.getName());
+            } catch (IOException | SecurityException error) {
+                finishSend(session, session.cancelled ? "Transfer cancelled" : "Could not send: " + error.getMessage());
+            }
+        });
     }
 
     private void showTvFiles() {

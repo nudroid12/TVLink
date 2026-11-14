@@ -22,6 +22,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) exportName = state.getString("export_name");
         home();
     }
 
@@ -226,7 +227,7 @@ public class MainActivity extends Activity {
         setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", TvSettings.device(this), () -> editSetting("Device Name", "device_name", TvSettings.device(this)));
         setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
-        setting(rows, "Allow access all files", TvSettings.hasStorageAccess(this) ? "Allowed" : "Manage storage access", this::requestStorageAccess);
+        setting(rows, "Direct Downloads access", TvSettings.hasStorageAccess(this) ? "Allowed" : "Optional for direct Downloads transfers", this::requestStorageAccess);
         toggle(rows, "Receive Transfers", "Accept incoming transfers from other devices", "receive", true);
         toggle(rows, "Launch at startup", "Open TVLink at boot where supported by the TV", "startup", false);
         toggle(rows, "Overwrite", "Replace an existing file with the same name", "overwrite", false);
@@ -509,8 +510,24 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int EXPORT_FILE = 12;
+    private String exportName;
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString("export_name", exportName);
+    }
+
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_FILE) {
+            String name = exportName;
+            exportName = null;
+            if (result == RESULT_OK && name != null && data != null && data.getData() != null) {
+                exportCopy(name, data.getData());
+            }
+            return;
+        }
         if (request != 11 || result != RESULT_OK || data == null || data.getData() == null || !isLinked()) return;
         android.net.Uri uri = data.getData();
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
@@ -552,7 +569,7 @@ public class MainActivity extends Activity {
         boolean apk = file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
         new AlertDialog.Builder(this).setTitle(file.getName()).setItems(new String[] {
                 apk ? "Install APK" : "Open",
-                "Rename", "Delete", "Send to phone"
+                "Rename", "Delete", "Send to phone", "Save a copy"
         }, (d, choice) -> {
             switch (choice) {
                 case 0: openFile(file, apk); break;
@@ -566,8 +583,40 @@ public class MainActivity extends Activity {
                             }).show();
                     break;
                 case 3: sendFile(file); break;
+                case 4: chooseExportLocation(file); break;
             }
         }).show();
+    }
+
+    private void chooseExportLocation(File file) {
+        Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream");
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.putExtra(Intent.EXTRA_TITLE, file.getName());
+        try {
+            exportName = file.getName();
+            startActivityForResult(picker, EXPORT_FILE);
+        } catch (android.content.ActivityNotFoundException error) {
+            exportName = null;
+            notifyUser("No document picker is available on this device.");
+        }
+    }
+
+    private void exportCopy(String name, android.net.Uri target) {
+        File folder = received();
+        sender.execute(() -> {
+            try {
+                File source = TransferServer.file(folder, name);
+                try (InputStream in = new FileInputStream(source);
+                     OutputStream out = getContentResolver().openOutputStream(target, "wt")) {
+                    if (out == null) throw new IOException("Cannot write the selected document");
+                    byte[] buffer = new byte[65536];
+                    for (int count; (count = in.read(buffer)) != -1;) out.write(buffer, 0, count);
+                }
+                runOnUiThread(() -> notifyUser("Copy saved: " + name));
+            } catch (IOException | SecurityException error) {
+                runOnUiThread(() -> notifyUser("Could not save copy: " + error.getMessage()));
+            }
+        });
     }
 
     private void renameFile(File file) {
