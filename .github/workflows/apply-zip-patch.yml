@@ -77,6 +77,22 @@ jobs:
                   destination = Path(entry.filename)
                   destination.parent.mkdir(parents=True, exist_ok=True)
                   destination.write_bytes(archive.read(entry))
+
+              # Overlay ZIPs do not remove files omitted by a newer version.
+              tv_manifest = "tv/src/main/AndroidManifest.xml"
+              remote_client = "mobile/src/main/java/com/tvlink/mobile/AndroidTvRemote.java"
+              if (remote_client in seen and tv_manifest in seen
+                      and "WifiRemoteService" not in Path(tv_manifest).read_text(encoding="utf-8")):
+                  obsolete = (
+                      "tv/src/main/java/com/tvlink/tv/WifiRemoteService.java",
+                      "tv/src/main/res/xml/wifi_remote_accessibility.xml",
+                  )
+                  for name in obsolete:
+                      if name in seen:
+                          continue
+                      path = Path(name)
+                      if not any(parent.is_symlink() for parent in path.parents):
+                          path.unlink(missing_ok=True)
           PYTHON
           git --literal-pathspecs rm -- "$patch"
           git add --all
