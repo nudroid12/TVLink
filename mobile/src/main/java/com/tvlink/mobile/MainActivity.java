@@ -73,6 +73,11 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private void showSettings() {
+        LinearLayout body = feature("Settings");
+        body.addView(button("Check for updates", () -> ReleaseCheck.check(this)));
+    }
+
     private void home() {
         showingHome = true;
         LinearLayout page = screen(null);
@@ -87,6 +92,13 @@ public class MainActivity extends Activity {
         header.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
         Button pair = button(hasFilePairing() && hasRemotePairing() ? "Paired" : "Pair", this::pairMenu);
         header.addView(pair, new LinearLayout.LayoutParams(dp(84), dp(48)));
+        Button settings = button("", this::showSettings);
+        settings.setContentDescription("Settings");
+        settings.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_settings, 0, 0, 0);
+        settings.setPadding(dp(12), 0, dp(12), 0);
+        LinearLayout.LayoutParams settingsSize = new LinearLayout.LayoutParams(dp(48), dp(48));
+        settingsSize.setMarginStart(dp(8));
+        header.addView(settings, settingsSize);
 
         android.view.View divider = new android.view.View(this);
         divider.setBackgroundColor(0xff303c56);

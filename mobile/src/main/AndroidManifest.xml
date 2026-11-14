@@ -1,7 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application android:label="TVLink" android:icon="@mipmap/tvlink_launcher"  android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false">
+        <provider android:name=".UpdateFileProvider"
+            android:authorities="com.tvlink.mobile.files" android:exported="false"
+            android:grantUriPermissions="true"/>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

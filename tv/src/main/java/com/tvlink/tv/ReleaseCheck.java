@@ -9,7 +9,6 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class ReleaseCheck {
@@ -27,23 +26,21 @@ final class ReleaseCheck {
             String result;
             String link = null;
             try {
-                String installed = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0).versionName;
+                android.content.pm.PackageInfo current = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0);
+                long installed = android.os.Build.VERSION.SDK_INT >= 28
+                        ? current.getLongVersionCode() : current.versionCode;
                 JSONObject release = fetch();
-                String tag = release.getString("tag_name");
-                if (compare(tag, installed) <= 0) {
-                    result = "You already have the latest release (" + installed + ").";
+                long next = release.getLong("versionCode");
+                if (next <= installed) {
+                    result = "You already have the latest update (" + current.versionName + ").";
                 } else {
-                    JSONArray assets = release.optJSONArray("assets");
-                    for (int i = 0; assets != null && i < assets.length(); i++) {
-                        JSONObject asset = assets.getJSONObject(i);
-                        String name = asset.getString("name");
-                        if (name.matches("(?i)TVLink-TV(?:-[A-Za-z0-9._-]+)?\\.apk")) {
-                            link = asset.getString("browser_download_url");
-                            break;
-                        }
-                    }
-                    result = link == null ? tag + " is available, but it has no TV APK attached."
-                            : "TV version " + tag + " is available. Installed: " + installed + ".";
+                    String version = release.getString("versionName");
+                    String candidate = release.getString("downloadUrl");
+                    String expected = "https://github.com/" + REPO + "/releases/download/tvlink-dev/TVLink-TV-" + next + ".apk";
+                    if (!expected.equals(candidate)) throw new java.io.IOException("Invalid update URL");
+                    link = candidate;
+                    result = "Version " + version + " is available. Installed: " + current.versionName + ".";
                 }
             } catch (java.io.FileNotFoundException error) {
                 result = error.getMessage();
@@ -194,12 +191,12 @@ final class ReleaseCheck {
     }
 
     private static JSONObject fetch() throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL("https://api.github.com/repos/" + REPO + "/releases/latest").openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL("https://github.com/" + REPO + "/releases/download/tvlink-dev/tv-update.json").openConnection();
         conn.setConnectTimeout(8000);
         conn.setReadTimeout(8000);
-        conn.setRequestProperty("Accept", "application/vnd.github+json");
+        conn.setUseCaches(false);
         try {
-            if (conn.getResponseCode() == 404) throw new java.io.FileNotFoundException("No public stable GitHub release found.");
+            if (conn.getResponseCode() == 404) throw new java.io.FileNotFoundException("No update has been published for this app yet.");
             try (InputStream input = conn.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 byte[] bytes = new byte[8192];
                 for (int count; (count = input.read(bytes)) != -1;) {
@@ -211,16 +208,5 @@ final class ReleaseCheck {
         } finally {
             conn.disconnect();
         }
-    }
-
-    private static int compare(String latest, String installed) {
-        String[] left = latest.replaceFirst("^[vV]", "").split("\\.");
-        String[] right = installed.split("\\.");
-        for (int i = 0; i < Math.max(left.length, right.length); i++) {
-            int a = i < left.length ? Integer.parseInt(left[i]) : 0;
-            int b = i < right.length ? Integer.parseInt(right[i]) : 0;
-            if (a != b) return Integer.compare(a, b);
-        }
-        return 0;
     }
 }

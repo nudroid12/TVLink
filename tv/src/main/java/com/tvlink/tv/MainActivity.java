@@ -186,6 +186,14 @@ public class MainActivity extends Activity {
         info(body, "On your phone, open TVLink → Remote. Pair with Android TV using the code shown on this TV.");
     }
 
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (android.content.pm.PackageManager.NameNotFoundException error) {
+            return "";
+        }
+    }
+
     private void showSettings() {
         showingHome = false;
         receivingScreen = false;
@@ -199,7 +207,7 @@ public class MainActivity extends Activity {
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(rows);
-        setting(rows, "Check for updates", "GitHub Releases", () -> ReleaseCheck.check(this));
+        setting(rows, "Check for updates", "App version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", TvSettings.device(this), () -> editSetting("Device Name", "device_name", TvSettings.device(this)));
         setting(rows, "Transfer Directory", received().getAbsolutePath(), this::chooseDirectory);
         setting(rows, "Allow access all files", TvSettings.hasStorageAccess(this) ? "Allowed" : "Manage storage access", this::requestStorageAccess);
