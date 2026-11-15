@@ -20,8 +20,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
-    private static final int FOCUS_OUTLINE = 0xfff2f5ff;
-    private static final int ACCENT_BLUE = 0xff7fb1fe;
+    private static final int FOCUS_FILL = Color.WHITE;
+    private static final int FOCUS_BLUE = 0xff7fb1fe;
 
     private boolean showingHome;
 
@@ -61,38 +61,50 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_OUTLINE : CONTENT_DIVIDER);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_FILL : CONTENT_DIVIDER);
         return shape;
     }
 
     private StateListDrawable highlightOnFocus(int fill) {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(fill, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_FILL, true));
         background.addState(new int[] {}, tile(fill, false));
         return background;
     }
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(Color.TRANSPARENT, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_FILL, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
 
+    private android.content.res.ColorStateList focusText(int normal) {
+        return new android.content.res.ColorStateList(
+                new int[][] {{android.R.attr.state_focused}, {}}, new int[] {0xff0c1c35, normal});
+    }
+
     private void styleRowText(TextView text) {
-        text.setTextColor(Color.WHITE);
+        text.setTextColor(focusText(Color.WHITE));
         text.setTextSize(18);
         text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
     }
 
     private Button button(String title, Runnable action) {
-        Button button = new Button(this);
+        return styleButton(new Button(this), title, action, false);
+    }
+
+    private Button styleButton(Button button, String title, Runnable action, boolean primary) {
         button.setText(title);
         button.setAllCaps(false);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(focusText(primary ? 0xff0c1c35 : Color.WHITE));
+        button.setCompoundDrawableTintList(focusText(Color.WHITE));
         button.setTextSize(18);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(highlightOnFocus(0xff1b2740));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_FILL, true));
+        background.addState(new int[] {}, tile(primary ? 0xff9ac2ff : 0xff1b2740, false));
+        button.setBackground(background);
         button.setOnClickListener(view -> action.run());
         return button;
     }
@@ -246,13 +258,19 @@ public class MainActivity extends Activity {
         row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 2));
         for (int index = 0; index < titles.length; index++) {
             Button card = button(titles[index], actions[index]);
+            card.setBackground(highlightOnFocus(0xff1b2740));
+            card.setTextColor(new android.content.res.ColorStateList(
+                    new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
+                    new int[] {0xff0c1c35, Color.WHITE}));
             android.graphics.drawable.Drawable icon = getDrawable(icons[index]).mutate();
             int iconSize = Math.min(dp(56), width / 2);
             icon.setBounds(0, 0, iconSize, iconSize);
             card.setCompoundDrawables(null, icon, null, null);
             card.setPadding(dp(4), height / 6, dp(4), height / 9);
             card.setTextSize(22);
-            icon.setTint(Color.WHITE);
+            card.getCompoundDrawables()[1].mutate().setTintList(new android.content.res.ColorStateList(
+                    new int[][] {new int[] {android.R.attr.state_focused}, new int[] {}},
+                    new int[] {0xff0c1c35, Color.WHITE}));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
             row.addView(card, params);
             row.addView(new android.view.View(this),
@@ -333,16 +351,19 @@ public class MainActivity extends Activity {
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.VERTICAL);
         labels.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        labels.setDuplicateParentStateEnabled(true);
         row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
         TextView heading = new TextView(this);
         heading.setText(title);
         heading.setTextSize(18);
-        heading.setTextColor(Color.WHITE);
+        heading.setDuplicateParentStateEnabled(true);
+        heading.setTextColor(focusText(Color.WHITE));
         labels.addView(heading);
         TextView description = new TextView(this);
         description.setText(detail);
         description.setTextSize(14);
-        description.setTextColor(0xffb8c3d6);
+        description.setDuplicateParentStateEnabled(true);
+        description.setTextColor(focusText(0xffb8c3d6));
         LinearLayout.LayoutParams descriptionSize = new LinearLayout.LayoutParams(-1, -2);
         descriptionSize.topMargin = dp(2);
         labels.addView(description, descriptionSize);
@@ -350,6 +371,11 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-2, -2);
             size.setMarginStart(dp(12));
             row.addView(control, size);
+            android.content.res.ColorStateList normalTint = control.getButtonTintList();
+            android.content.res.ColorStateList focusedTint = new android.content.res.ColorStateList(
+                    new int[][] {{android.R.attr.state_checked}, {}}, new int[] {0xff0c1c35, 0xff53627a});
+            row.setOnFocusChangeListener((view, focused) ->
+                    control.setButtonTintList(focused ? focusedTint : normalTint));
         }
         android.view.View line = new android.view.View(this);
         line.setBackgroundColor(CONTENT_DIVIDER);
@@ -508,11 +534,11 @@ public class MainActivity extends Activity {
                     .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show();
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xffff7186);
         });
-        unpair.setTextColor(0xffff9baa);
+        unpair.setTextColor(focusText(0xffff9baa));
         StateListDrawable unpairBackground = new StateListDrawable();
-        unpairBackground.addState(new int[] {android.R.attr.state_focused}, tile(0xff1b2740, true));
+        unpairBackground.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_FILL, true));
         GradientDrawable unpairOutline = tile(0xff1b2740, false);
-        unpairOutline.setStroke(dp(1), ACCENT_BLUE);
+        unpairOutline.setStroke(dp(1), FOCUS_BLUE);
         unpairBackground.addState(new int[] {}, unpairOutline);
         unpair.setBackground(unpairBackground);
         card.addView(unpair, new LinearLayout.LayoutParams(-1, dp(44)));
@@ -522,10 +548,10 @@ public class MainActivity extends Activity {
         addPairingIntro(body, "Use TVLink on your phone to control this TV.");
         Button action = button("Pair phone", this::showLinkStatus);
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff121d33, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_FILL, true));
         background.addState(new int[] {}, tile(0xff121d33, false));
         action.setBackground(background);
-        action.setTextColor(Color.WHITE);
+        action.setTextColor(focusText(Color.WHITE));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(320), dp(48));
         size.topMargin = dp(18);
         body.addView(action, size);
@@ -595,7 +621,7 @@ public class MainActivity extends Activity {
             pairing.setTextColor(0xffa9c8ff);
             GradientDrawable dot = new GradientDrawable();
             dot.setShape(GradientDrawable.OVAL);
-            dot.setColor(ACCENT_BLUE);
+            dot.setColor(FOCUS_BLUE);
             dot.setBounds(0, 0, dp(8), dp(8));
             pairing.setCompoundDrawablesRelative(dot, null, null, null);
             pairing.setCompoundDrawablePadding(dp(10));
@@ -795,7 +821,7 @@ public class MainActivity extends Activity {
                 if (!message.contentEquals(status.getText())) {
                     android.text.SpannableString label = new android.text.SpannableString(message);
                     if (message.startsWith("●  Ready")) {
-                        label.setSpan(new android.text.style.ForegroundColorSpan(ACCENT_BLUE), 0, 1,
+                        label.setSpan(new android.text.style.ForegroundColorSpan(FOCUS_BLUE), 0, 1,
                                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     status.setText(label);
@@ -1012,7 +1038,8 @@ public class MainActivity extends Activity {
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(file.isDirectory() ? R.drawable.tv_ic_files : R.drawable.ic_tv_document);
-        icon.setColorFilter(Color.WHITE);
+        icon.setDuplicateParentStateEnabled(true);
+        icon.setImageTintList(focusText(Color.WHITE));
         String filename = file.getName();
         if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
             String path = file.getAbsolutePath();
@@ -1025,7 +1052,7 @@ public class MainActivity extends Activity {
                         android.graphics.drawable.Drawable appIcon = archive.applicationInfo.loadIcon(getPackageManager());
                         runOnUiThread(() -> {
                             if (icon.isAttachedToWindow()) {
-                                icon.clearColorFilter();
+                                icon.setImageTintList(null);
                                 icon.setImageDrawable(appIcon);
                             }
                         });
@@ -1039,26 +1066,30 @@ public class MainActivity extends Activity {
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.VERTICAL);
         labels.setPadding(dp(16), 0, dp(12), 0);
+        labels.setDuplicateParentStateEnabled(true);
         row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
         TextView name = new TextView(this);
         name.setText(filename);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setDuplicateParentStateEnabled(true);
         styleRowText(name);
         labels.addView(name);
         TextView size = new TextView(this);
         size.setText(file.isDirectory() ? "Folder" : android.text.format.Formatter.formatShortFileSize(this, file.length()));
+        size.setDuplicateParentStateEnabled(true);
         styleRowText(size);
         size.setTextSize(14);
         labels.addView(size);
         TextView date = new TextView(this);
         date.setText(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,
                 java.text.DateFormat.SHORT).format(new java.util.Date(file.lastModified())));
+        date.setDuplicateParentStateEnabled(true);
         styleRowText(date);
         date.setTextSize(14);
         row.addView(date);
-        size.setTextColor(0xffb8c3d6);
-        date.setTextColor(0xffb8c3d6);
+        size.setTextColor(focusText(0xffb8c3d6));
+        date.setTextColor(focusText(0xffb8c3d6));
         divider(body);
     }
 
@@ -1135,12 +1166,12 @@ public class MainActivity extends Activity {
             action.run();
         });
         row.setBackground(flatRowBackground());
-        row.setTextColor(color);
+        row.setTextColor(focusText(color));
         row.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), 0, dp(14), 0);
         row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
-        row.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(color));
+        row.setCompoundDrawableTintList(focusText(color));
         row.setCompoundDrawablePadding(dp(14));
         panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
         return row;
