@@ -62,7 +62,7 @@ public class MainActivity extends Activity {
 
     private StateListDrawable flatRowBackground() {
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(Color.TRANSPARENT, true));
         background.addState(new int[] {}, new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         return background;
     }
@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
     }
 
     private void styleRowText(TextView text) {
-        text.setTextColor(focusText(Color.WHITE));
+        text.setTextColor(Color.WHITE);
         text.setTextSize(18);
         text.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
     }
@@ -342,12 +342,6 @@ public class MainActivity extends Activity {
             size.setMarginStart(dp(12));
             row.addView(control, size);
         }
-        row.setOnFocusChangeListener((view, focused) -> {
-            heading.setTextColor(focused ? 0xff0c1c35 : Color.WHITE);
-            description.setTextColor(focused ? 0xff192a46 : 0xffb8c3d6);
-            if (control != null) control.setButtonTintList(focused
-                    ? android.content.res.ColorStateList.valueOf(0xff0c1c35) : null);
-        });
         android.view.View line = new android.view.View(this);
         line.setBackgroundColor(0xff34425a);
         rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
@@ -891,6 +885,7 @@ public class MainActivity extends Activity {
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(file.isDirectory() ? R.drawable.ic_files : R.drawable.ic_document);
+        icon.setColorFilter(Color.WHITE);
         String filename = file.getName();
         if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
             String path = file.getAbsolutePath();
@@ -903,7 +898,6 @@ public class MainActivity extends Activity {
                         android.graphics.drawable.Drawable appIcon = archive.applicationInfo.loadIcon(getPackageManager());
                         runOnUiThread(() -> {
                             if (icon.isAttachedToWindow()) {
-                                icon.setTag(Boolean.TRUE);
                                 icon.clearColorFilter();
                                 icon.setImageDrawable(appIcon);
                             }
@@ -936,17 +930,6 @@ public class MainActivity extends Activity {
         styleRowText(date);
         date.setTextSize(14);
         row.addView(date);
-        row.setOnFocusChangeListener((view, focused) -> {
-            int primary = focused ? 0xff0c1c35 : Color.WHITE;
-            int secondary = focused ? 0xff192a46 : 0xffb8c3d6;
-            name.setTextColor(primary);
-            size.setTextColor(secondary);
-            date.setTextColor(secondary);
-            if (!Boolean.TRUE.equals(icon.getTag())) {
-                icon.setColorFilter(primary);
-            }
-        });
-        icon.setColorFilter(Color.WHITE);
         size.setTextColor(0xffb8c3d6);
         date.setTextColor(0xffb8c3d6);
         divider(body);
@@ -1021,12 +1004,12 @@ public class MainActivity extends Activity {
             action.run();
         });
         row.setBackground(flatRowBackground());
-        row.setTextColor(focusText(color));
+        row.setTextColor(color);
         row.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), 0, dp(14), 0);
         row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
-        row.setCompoundDrawableTintList(focusText(color));
+        row.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(color));
         row.setCompoundDrawablePadding(dp(14));
         panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
         return row;
