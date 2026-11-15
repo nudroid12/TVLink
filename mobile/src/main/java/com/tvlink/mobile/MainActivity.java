@@ -1887,17 +1887,22 @@ public class MainActivity extends Activity {
 
     private Button remoteKeyboardButton;
     private AndroidTvRemote.ImeState remoteIme;
-    private AlertDialog remoteKeyboardDialog;
+    private android.app.Dialog remoteKeyboardDialog;
     private EditText remoteEditor;
     private Runnable pendingRemoteText;
     private boolean updatingRemoteEditor;
 
     private void updateRemoteIme(AndroidTvRemote.ImeState state) {
-        boolean changedField = remoteIme != null && (state == null || state.field != remoteIme.field);
+        boolean changedField = state != null && (remoteIme == null || state.field != remoteIme.field);
         remoteIme = state;
         if (remoteKeyboardButton != null) remoteKeyboardButton.setVisibility(
                 state == null ? android.view.View.GONE : android.view.View.VISIBLE);
-        if (changedField && remoteKeyboardDialog != null) remoteKeyboardDialog.dismiss();
+        if (remoteKeyboardDialog != null && (state == null || changedField)) {
+            cancelPendingRemoteText();
+            remoteKeyboardDialog.dismiss();
+            return;
+        }
+        if (changedField && !remoteConnecting) openRemoteKeyboard();
         if (state != null && remoteEditor != null && !state.text.contentEquals(remoteEditor.getText())) {
             cancelPendingRemoteText();
             updatingRemoteEditor = true;
@@ -1916,23 +1921,48 @@ public class MainActivity extends Activity {
     private void openRemoteKeyboard() {
         AndroidTvRemote.ImeState state = remoteIme;
         AndroidTvRemote connection = remoteConnection;
-        if (state == null || connection == null || !connection.isOpen() || remoteKeyboardDialog != null) return;
-        EditText editor = new EditText(this);
-        editor.setSingleLine(true);
+        if (!started || isFinishing() || isDestroyed() || state == null || connection == null
+                || !connection.isOpen() || remoteKeyboardDialog != null) return;
+
+        android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Material_NoActionBar);
+        LinearLayout page = new LinearLayout(dialog.getContext());
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(24), dp(16), dp(24), dp(12));
+        page.setBackgroundColor(REMOTE_NAVY);
+
+        TextView device = new TextView(dialog.getContext());
+        device.setText(linkedTvName());
+        device.setTextColor(REMOTE_BLUE);
+        device.setTextSize(22);
+        device.setGravity(Gravity.CENTER);
+        page.addView(device, new LinearLayout.LayoutParams(-1, dp(48)));
+
+        EditText editor = new EditText(dialog.getContext());
         editor.setInputType(state.inputType);
+        editor.setHorizontallyScrolling(false);
+        editor.setMaxLines(8);
+        editor.setTextColor(Color.WHITE);
+        editor.setHintTextColor(0xffb8c3d6);
+        editor.setTextSize(30);
+        editor.setGravity(Gravity.TOP | Gravity.START);
+        editor.setBackgroundColor(Color.TRANSPARENT);
+        editor.setPadding(0, dp(20), 0, dp(12));
         editor.setHint("Start typing on your phone to see it on TV");
         editor.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(8000)});
         editor.setText(state.text);
         editor.setSelection(editor.length());
+        page.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        LinearLayout container = new LinearLayout(this);
-        container.setPadding(dp(20), dp(12), dp(20), dp(8));
-        container.addView(editor, new LinearLayout.LayoutParams(-1, -2));
-        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog)
-                .setTitle("TV keyboard")
-                .setView(container)
-                .setPositiveButton("Switch to navigation", null)
-                .create();
+        Button navigation = button("Switch to navigation", () -> {
+            Runnable latest = pendingRemoteText;
+            cancelPendingRemoteText();
+            if (latest != null) latest.run();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams navigationSize = new LinearLayout.LayoutParams(-2, dp(48));
+        navigationSize.gravity = Gravity.CENTER_HORIZONTAL;
+        page.addView(navigation, navigationSize);
+        dialog.setContentView(page);
         remoteKeyboardDialog = dialog;
         remoteEditor = editor;
         int generation = remoteSessionGeneration;
@@ -1964,14 +1994,36 @@ public class MainActivity extends Activity {
             cancelPendingRemoteText();
             remoteEditor = null;
             remoteKeyboardDialog = null;
+            if (remoteIme != null && remoteIme.field != state.field && !remoteConnecting) {
+                openRemoteKeyboard();
+            }
         });
-        showTextEditor(dialog, editor);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-            Runnable latest = pendingRemoteText;
-            cancelPendingRemoteText();
-            if (latest != null) latest.run();
-            dialog.dismiss();
-        });
+
+        android.view.Window window = dialog.getWindow();
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        Runnable showKeyboard = () -> {
+            if (!dialog.isShowing() || !editor.requestFocus()) return;
+            if (android.os.Build.VERSION.SDK_INT >= 30 && window.getInsetsController() != null) {
+                window.getInsetsController().show(android.view.WindowInsets.Type.ime());
+                return;
+            }
+            android.view.inputmethod.InputMethodManager ime =
+                    getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (ime != null) ime.showSoftInput(editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        };
+        page.getViewTreeObserver().addOnWindowFocusChangeListener(
+                new android.view.ViewTreeObserver.OnWindowFocusChangeListener() {
+                    @Override public void onWindowFocusChanged(boolean focused) {
+                        if (!focused) return;
+                        page.getViewTreeObserver().removeOnWindowFocusChangeListener(this);
+                        editor.post(showKeyboard);
+                    }
+                });
+        editor.setOnClickListener(view -> editor.post(showKeyboard));
+        editor.requestFocus();
+        dialog.show();
+        window.setLayout(-1, -1);
     }
 
     private TextView remoteStatus;
@@ -2008,6 +2060,7 @@ public class MainActivity extends Activity {
                 remoteConnecting = false;
                 if (result == null) {
                     status.setText(linkedTvName() + " · Connected");
+                    if (remoteIme != null) openRemoteKeyboard();
                 } else {
                     status.setText(linkedTvName() + " · Disconnected");
                     progress.failed("Remote disconnected", result, "Reconnect",
