@@ -47,7 +47,7 @@ jobs:
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile
 
-          MODULES = {"mobile", "tv", "shared"}
+          MODULES = {"mobile", "tv", "shared", "universal"}
           ROOT_FILES = {"settings.gradle.kts", "build.gradle.kts", "gradle.properties"}
           MAX_BYTES = 100 * 1024 * 1024
 
