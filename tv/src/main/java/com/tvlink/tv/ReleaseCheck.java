@@ -19,6 +19,13 @@ final class ReleaseCheck {
     private static final String REPO = "nudroid12/TVLink";
 
     static void check(Activity activity) {
+        if ("com.tvlink.universal".equals(activity.getPackageName())) {
+            new android.app.AlertDialog.Builder(activity)
+                    .setTitle("Universal updates")
+                    .setMessage("Download the latest Universal APK from the TVLink Universal build in GitHub Actions.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         if (checking || downloading) return;
         checking = true;
         android.widget.Toast.makeText(activity, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show();
@@ -103,7 +110,7 @@ final class ReleaseCheck {
                     showResult(activity, message);
                     return;
                 }
-                Uri uri = new Uri.Builder().scheme("content").authority("com.tvlink.tv.files")
+                Uri uri = new Uri.Builder().scheme("content").authority(activity.getPackageName() + ".files")
                         .appendPath("updates").appendPath(UPDATE_FILE).build();
                 try {
                     activity.startActivity(new Intent(Intent.ACTION_VIEW)

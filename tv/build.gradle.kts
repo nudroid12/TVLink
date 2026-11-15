@@ -1,12 +1,12 @@
 plugins { id("com.android.application") }
 android {
-    namespace = "com.tvlink.tv"
+    namespace = "com.tvlink.ui"
     compileSdk = 35
     defaultConfig {
         applicationId = "com.tvlink.tv"
         minSdk = 24
         targetSdk = 34
-        versionCode = 44
-        versionName = "0.5.36"
+        versionCode = 45
+        versionName = "0.5.37"
     }
 }

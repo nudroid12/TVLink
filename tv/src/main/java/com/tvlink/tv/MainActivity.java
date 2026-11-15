@@ -1,5 +1,7 @@
 package com.tvlink.tv;
 
+import com.tvlink.ui.R;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -23,7 +25,7 @@ public class MainActivity extends Activity {
     private boolean showingHome;
 
     @Override public void onCreate(Bundle state) {
-        setTheme(R.style.TVLinkTheme);
+        setTheme(R.style.TVLinkTelevisionTheme);
         super.onCreate(state);
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
@@ -170,7 +172,7 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.tvlink_wordmark);
+        logo.setImageResource(R.drawable.tv_tvlink_wordmark);
         logo.setContentDescription("TVLink");
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         header.addView(logo, new LinearLayout.LayoutParams(dp(116), -1));
@@ -188,7 +190,7 @@ public class MainActivity extends Activity {
         pair.setVisibility(pairingIntro ? android.view.View.GONE : android.view.View.VISIBLE);
         Button gear = button("", this::showSettings);
         gear.setContentDescription("Settings");
-        gear.setCompoundDrawablesWithIntrinsicBounds(0, R.drawable.ic_settings, 0, 0);
+        gear.setCompoundDrawablesWithIntrinsicBounds(0, R.drawable.tv_ic_settings, 0, 0);
         gear.setPadding(0, dp(10), 0, 0);
         LinearLayout.LayoutParams gearSize = new LinearLayout.LayoutParams(dp(44), dp(44));
         gearSize.setMarginStart(dp(8));
@@ -237,7 +239,7 @@ public class MainActivity extends Activity {
         int width = Math.round((metrics.widthPixels - dp(48)) * .23f);
         int height = Math.min(Math.round(metrics.heightPixels * .44f), metrics.heightPixels - dp(126));
         String[] titles = {"Send / Receive", "Remote", "Files"};
-        int[] icons = {R.drawable.ic_send, R.drawable.ic_remote, R.drawable.ic_files};
+        int[] icons = {R.drawable.tv_ic_send, R.drawable.tv_ic_remote, R.drawable.tv_ic_files};
         Runnable[] actions = {this::showReceive, this::showRemoteHelp, this::showFiles};
         // Keep equal outer margins while bringing the cards closer together.
         row.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 2));
@@ -475,10 +477,15 @@ public class MainActivity extends Activity {
         deviceCardName.setGravity(Gravity.CENTER);
         deviceCardName.setMaxLines(2);
         deviceCardName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        card.addView(button("Unpair", () -> new AlertDialog.Builder(this).setTitle("Unpair " + peerName() + "?")
-                .setMessage("This removes the file link. Android TV Remote access can be removed in system settings.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show()), new LinearLayout.LayoutParams(-1, dp(44)));
+        Button unpair = button("Unpair", () -> {
+            AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Unpair " + peerName() + "?")
+                    .setMessage("This removes the file link. Android TV Remote access can be removed in system settings.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Unpair", (d, w) -> unpairPhone()).show();
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xffff7186);
+        });
+        unpair.setTextColor(focusText(0xffff9baa));
+        card.addView(unpair, new LinearLayout.LayoutParams(-1, dp(44)));
     }
 
     private void addUnlinkedDevice(LinearLayout body) {
@@ -500,7 +507,7 @@ public class MainActivity extends Activity {
         body.setGravity(Gravity.CENTER);
         body.setPadding(0, dp(12), 0, dp(28));
         ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_pair_devices);
+        icon.setImageResource(R.drawable.tv_ic_pair_devices);
         body.addView(icon, new LinearLayout.LayoutParams(dp(132), dp(66)));
 
         TextView heading = new TextView(this);
@@ -620,9 +627,9 @@ public class MainActivity extends Activity {
         columns.addView(send, new LinearLayout.LayoutParams(0, -2, 2));
         addTransferHeading(send, "Send");
         Button sendFile = button("Send file", this::chooseFileToSend);
-        sendFile.setBackground(highlightOnFocus(0xff1b2740));
+        sendFile.setBackground(highlightOnFocus(0xff82aaff));
         sendFile.setTextColor(new android.content.res.ColorStateList(
-                new int[][] {{android.R.attr.state_focused}, {}}, new int[] {0xff0c1c35, Color.WHITE}));
+                new int[][] {{android.R.attr.state_focused}, {}}, new int[] {0xff0c1c35, 0xff121725}));
         send.addView(sendFile, new LinearLayout.LayoutParams(dp(160), dp(48)));
 
         android.view.View rule = new android.view.View(this);
@@ -961,7 +968,7 @@ public class MainActivity extends Activity {
         row.setBackground(flatRowBackground());
         body.addView(row, new LinearLayout.LayoutParams(-1, dp(62)));
         ImageView icon = new ImageView(this);
-        icon.setImageResource(file.isDirectory() ? R.drawable.ic_files : R.drawable.ic_document);
+        icon.setImageResource(file.isDirectory() ? R.drawable.tv_ic_files : R.drawable.ic_tv_document);
         icon.setColorFilter(Color.WHITE);
         String filename = file.getName();
         if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) {
@@ -1035,7 +1042,7 @@ public class MainActivity extends Activity {
         heading.setGravity(Gravity.CENTER_VERTICAL);
         panel.addView(heading);
         ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_document);
+        icon.setImageResource(R.drawable.ic_tv_document);
         icon.setColorFilter(Color.WHITE);
         heading.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
         LinearLayout labels = new LinearLayout(this);
@@ -1121,7 +1128,7 @@ public class MainActivity extends Activity {
                 return;
             }
             android.net.Uri.Builder builder = new android.net.Uri.Builder().scheme("content")
-                    .authority("com.tvlink.tv.files");
+                    .authority(getPackageName() + ".files");
             android.net.Uri uri = storageFolder == null ? builder.appendPath(file.getName()).build()
                     : builder.appendPath("storage").appendPath(file.getAbsolutePath()).build();
             String type = apk ? "application/vnd.android.package-archive" : getContentResolver().getType(uri);

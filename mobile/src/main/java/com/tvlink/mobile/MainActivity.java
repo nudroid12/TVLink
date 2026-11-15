@@ -1,5 +1,7 @@
 package com.tvlink.mobile;
 
+import com.tvlink.ui.R;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -381,6 +383,14 @@ public class MainActivity extends Activity {
         addTransferHeading(body, "Send");
         Button send = hasFilePairing() ? button("Send file", this::chooseFileToSend)
                 : button("Pair TV", () -> pairSystemRemote(this::showTransfers));
+        if (hasFilePairing()) {
+            StateListDrawable background = new StateListDrawable();
+            background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
+            background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
+            background.addState(new int[] {}, tile(0xff82aaff, false));
+            send.setBackground(background);
+            send.setTextColor(0xff121725);
+        }
         send.setPadding(dp(16), 0, dp(16), 0);
         body.addView(send, new LinearLayout.LayoutParams(-2, dp(48)));
         divider(body);
@@ -606,7 +616,9 @@ public class MainActivity extends Activity {
         TextView status = info(card, linkedFiles ? "Remote and file transfers paired."
                 : "Remote paired · File transfer not connected");
         status.setGravity(Gravity.CENTER);
-        card.addView(button("Unpair", this::confirmUnpair), new LinearLayout.LayoutParams(-1, -2));
+        Button unpair = button("Unpair", this::confirmUnpair);
+        unpair.setTextColor(0xffff9baa);
+        card.addView(unpair, new LinearLayout.LayoutParams(-1, -2));
 
         Button change = button(linkedFiles ? "Change TV" : "Connect file transfer",
                 () -> pairSystemRemote(this::showDevice));
@@ -655,10 +667,11 @@ public class MainActivity extends Activity {
     }
 
     private void confirmUnpair() {
-        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Unpair " + linkedTvName() + "?")
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Unpair " + linkedTvName() + "?")
                 .setMessage("This removes the saved Remote and file link from this phone.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Unpair", (d, w) -> unpairTv()).show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xffff7186);
     }
 
     private void unpairTv() {
