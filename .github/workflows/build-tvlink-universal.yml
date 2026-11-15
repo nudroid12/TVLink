@@ -81,12 +81,12 @@ jobs:
             fi
             "$sdkmanager_bin" --sdk_root="$sdk" --install "${missing[@]}"
           fi
-          env -u TVLINK_KEYSTORE_PASSWORD gradle :universal:assembleDebug -PuniversalVersionCode="$GITHUB_RUN_NUMBER" --stacktrace
+          env -u TVLINK_KEYSTORE_PASSWORD gradle :universal:assembleRelease -PuniversalVersionCode="$GITHUB_RUN_NUMBER" --stacktrace
           mkdir -p dist
           apksigner="$sdk/build-tools/34.0.0/apksigner"
           "$apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias tvlink \
             --ks-pass env:TVLINK_KEYSTORE_PASSWORD --key-pass env:TVLINK_KEYSTORE_PASSWORD \
-            --out dist/TVLink-Universal.apk universal/build/outputs/apk/debug/universal-debug.apk
+            --out dist/TVLink-Universal.apk universal/build/outputs/apk/release/universal-release-unsigned.apk
           "$apksigner" verify --print-certs dist/TVLink-Universal.apk
       - uses: actions/upload-artifact@v4
         with:

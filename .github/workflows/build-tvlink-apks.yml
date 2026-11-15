@@ -125,16 +125,16 @@ jobs:
             "$sdkmanager_bin" --sdk_root="$sdk" --install "${missing[@]}"
           fi
           tasks=()
-          if [[ "$MOBILE" == true ]]; then tasks+=(:mobile:assembleDebug); fi
-          if [[ "$TV" == true ]]; then tasks+=(:tv:assembleDebug); fi
+          if [[ "$MOBILE" == true ]]; then tasks+=(:mobile:assembleRelease); fi
+          if [[ "$TV" == true ]]; then tasks+=(:tv:assembleRelease); fi
           env -u TVLINK_KEYSTORE_PASSWORD gradle "${tasks[@]}" --stacktrace
           mkdir -p dist
           for module in mobile tv; do
             if [[ "$module" == mobile && "$MOBILE" != true ]] || [[ "$module" == tv && "$TV" != true ]]; then
               continue
             fi
-            apk="$module/build/outputs/apk/debug/$module-debug.apk"
-            signed_apk="dist/TVLink-${module^^}-debug.apk"
+            apk="$module/build/outputs/apk/release/$module-release-unsigned.apk"
+            signed_apk="dist/TVLink-${module^^}-release.apk"
             apksigner="$sdk/build-tools/34.0.0/apksigner"
             "$apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias tvlink \
               --ks-pass env:TVLINK_KEYSTORE_PASSWORD --key-pass env:TVLINK_KEYSTORE_PASSWORD \
@@ -145,15 +145,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.scope.outputs.mobile == 'true'
         with:
-          name: TVLink-MOBILE-debug
-          path: dist/TVLink-MOBILE-debug.apk
+          name: TVLink-MOBILE-release
+          path: dist/TVLink-MOBILE-release.apk
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: steps.scope.outputs.tv == 'true'
         with:
-          name: TVLink-TV-debug
-          path: dist/TVLink-TV-debug.apk
+          name: TVLink-TV-release
+          path: dist/TVLink-TV-release.apk
           if-no-files-found: error
 
       - name: Publish signed updates
@@ -172,7 +172,7 @@ jobs:
             gh release create tvlink-dev --target "$(git rev-parse HEAD)" --title 'TVLink Dev' --prerelease
           fi
           for module in mobile tv; do
-            apk="dist/TVLink-${module^^}-debug.apk"
+            apk="dist/TVLink-${module^^}-release.apk"
             [[ -f "$apk" ]] || continue
             feed=update.json
             if [[ "$module" == tv ]]; then feed=tv-update.json; fi
