@@ -19,13 +19,10 @@ final class ReleaseCheck {
     private static final String REPO = "nudroid12/TVLink";
 
     static void check(Activity activity) {
-        if ("com.tvlink.universal".equals(activity.getPackageName())) {
-            new android.app.AlertDialog.Builder(activity)
-                    .setTitle("Universal updates")
-                    .setMessage("Download the latest Universal APK from the TVLink Universal build in GitHub Actions.")
-                    .setPositiveButton("OK", null).show();
-            return;
-        }
+        boolean universal = "com.tvlink.universal".equals(activity.getPackageName());
+        String releasePath = universal ? "tvlink-universal" : "tvlink-dev";
+        String feed = universal ? "universal-update.json" : "tv-update.json";
+        String variant = universal ? "UNIVERSAL" : "TV";
         if (checking || downloading) return;
         checking = true;
         android.widget.Toast.makeText(activity, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show();
@@ -37,14 +34,15 @@ final class ReleaseCheck {
                         .getPackageInfo(activity.getPackageName(), 0);
                 long installed = android.os.Build.VERSION.SDK_INT >= 28
                         ? current.getLongVersionCode() : current.versionCode;
-                JSONObject release = fetch();
+                JSONObject release = fetch(releasePath, feed);
                 long next = release.getLong("versionCode");
                 if (next <= installed) {
                     result = "You already have the latest update (" + current.versionName + ").";
                 } else {
                     String version = release.getString("versionName");
                     String candidate = release.getString("downloadUrl");
-                    String expected = "https://github.com/" + REPO + "/releases/download/tvlink-dev/TVLink-TV-" + next + ".apk";
+                    String expected = "https://github.com/" + REPO + "/releases/download/" + releasePath
+                            + "/TVLink-" + variant + "-" + next + ".apk";
                     if (!expected.equals(candidate)) throw new java.io.IOException("Invalid update URL");
                     link = candidate;
                     result = "Version " + version + " is available. Installed: " + current.versionName + ".";
@@ -197,8 +195,8 @@ final class ReleaseCheck {
         }
     }
 
-    private static JSONObject fetch() throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL("https://github.com/" + REPO + "/releases/download/tvlink-dev/tv-update.json").openConnection();
+    private static JSONObject fetch(String releasePath, String feed) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL("https://github.com/" + REPO + "/releases/download/" + releasePath + "/" + feed).openConnection();
         conn.setConnectTimeout(8000);
         conn.setReadTimeout(8000);
         conn.setUseCaches(false);

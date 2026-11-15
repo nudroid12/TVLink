@@ -31,6 +31,8 @@
         <receiver android:name="com.tvlink.universal.StartupReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
         </receiver>
+        <provider android:name="com.tvlink.mobile.UpdateFileProvider"
+            android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true"/>
         <provider android:name="com.tvlink.mobile.ReceivedFileProvider"
             android:authorities="${applicationId}.received" android:exported="false" android:grantUriPermissions="true"/>
         <provider android:name="com.tvlink.tv.ReceivedFileProvider"
