@@ -1309,7 +1309,7 @@ public class MainActivity extends Activity {
     private final java.util.concurrent.ThreadPoolExecutor remoteIo =
             new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.SECONDS,
                     new java.util.concurrent.LinkedBlockingQueue<>());
-    private AndroidTvRemote remoteConnection;
+    private volatile AndroidTvRemote remoteConnection;
     private boolean remotePairing;
 
     private static final int REMOTE_NAVY = 0xff0b1329;
@@ -1339,6 +1339,12 @@ public class MainActivity extends Activity {
         remoteStatus = status;
         status.setOnClickListener(view -> showDevice());
         status.setContentDescription("Connection status. Tap for paired device options.");
+
+        remoteKeyboardButton = button("Open keyboard", this::openRemoteKeyboard);
+        remoteKeyboardButton.setVisibility(android.view.View.GONE);
+        LinearLayout.LayoutParams keyboardSize = new LinearLayout.LayoutParams(-2, dp(48));
+        keyboardSize.gravity = Gravity.CENTER_HORIZONTAL;
+        page.addView(remoteKeyboardButton, keyboardSize);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -1879,12 +1885,102 @@ public class MainActivity extends Activity {
         });
     }
 
+    private Button remoteKeyboardButton;
+    private AndroidTvRemote.ImeState remoteIme;
+    private AlertDialog remoteKeyboardDialog;
+    private EditText remoteEditor;
+    private Runnable pendingRemoteText;
+    private boolean updatingRemoteEditor;
+
+    private void updateRemoteIme(AndroidTvRemote.ImeState state) {
+        boolean changedField = remoteIme != null && (state == null || state.field != remoteIme.field);
+        remoteIme = state;
+        if (remoteKeyboardButton != null) remoteKeyboardButton.setVisibility(
+                state == null ? android.view.View.GONE : android.view.View.VISIBLE);
+        if (changedField && remoteKeyboardDialog != null) remoteKeyboardDialog.dismiss();
+        if (state != null && remoteEditor != null && !state.text.contentEquals(remoteEditor.getText())) {
+            cancelPendingRemoteText();
+            updatingRemoteEditor = true;
+            remoteEditor.setText(state.text);
+            remoteEditor.setSelection(remoteEditor.length());
+            updatingRemoteEditor = false;
+        }
+    }
+
+    private void cancelPendingRemoteText() {
+        if (pendingRemoteText == null) return;
+        receiverHandler.removeCallbacks(pendingRemoteText);
+        pendingRemoteText = null;
+    }
+
+    private void openRemoteKeyboard() {
+        AndroidTvRemote.ImeState state = remoteIme;
+        AndroidTvRemote connection = remoteConnection;
+        if (state == null || connection == null || !connection.isOpen() || remoteKeyboardDialog != null) return;
+        EditText editor = new EditText(this);
+        editor.setSingleLine(true);
+        editor.setInputType(state.inputType);
+        editor.setHint("Start typing on your phone to see it on TV");
+        editor.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(8000)});
+        editor.setText(state.text);
+        editor.setSelection(editor.length());
+
+        LinearLayout container = new LinearLayout(this);
+        container.setPadding(dp(20), dp(12), dp(20), dp(8));
+        container.addView(editor, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog)
+                .setTitle("TV keyboard")
+                .setView(container)
+                .setPositiveButton("Switch to navigation", null)
+                .create();
+        remoteKeyboardDialog = dialog;
+        remoteEditor = editor;
+        int generation = remoteSessionGeneration;
+        editor.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            @Override public void afterTextChanged(android.text.Editable text) {}
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                if (updatingRemoteEditor) return;
+                cancelPendingRemoteText();
+                String value = text.toString();
+                pendingRemoteText = () -> {
+                    pendingRemoteText = null;
+                    remoteIo.execute(() -> {
+                        if (generation != remoteSessionGeneration || connection != remoteConnection) return;
+                        try {
+                            if (connection.replaceImeText(state.field, value)) return;
+                        } catch (IOException error) {
+                            closeSystemRemote();
+                        }
+                        runOnUiThread(() -> {
+                            if (remoteKeyboardDialog == dialog) dialog.dismiss();
+                        });
+                    });
+                };
+                receiverHandler.postDelayed(pendingRemoteText, 80);
+            }
+        });
+        dialog.setOnDismissListener(ignored -> {
+            cancelPendingRemoteText();
+            remoteEditor = null;
+            remoteKeyboardDialog = null;
+        });
+        showTextEditor(dialog, editor);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            Runnable latest = pendingRemoteText;
+            cancelPendingRemoteText();
+            if (latest != null) latest.run();
+            dialog.dismiss();
+        });
+    }
+
     private TextView remoteStatus;
     private boolean remoteConnecting;
     private volatile int remoteSessionGeneration;
 
     private void suspendRemoteSession() {
         remoteSessionGeneration++;
+        updateRemoteIme(null);
         remoteConnecting = false;
         remoteIo.execute(this::closeSystemRemote);
     }
@@ -1977,9 +2073,16 @@ public class MainActivity extends Activity {
 
     private void startRemote(String host, String pin, boolean legacyIdentity,
                              java.util.function.Consumer<String> log) throws Exception {
-        remoteConnection = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false, pin, legacyIdentity, log);
+        AndroidTvRemote connection = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false, pin, legacyIdentity, log);
+        remoteConnection = connection;
         log.accept("TLS connected. Negotiating Remote session…");
-        remoteConnection.start(log);
+        int generation = remoteSessionGeneration;
+        connection.start(log, state -> runOnUiThread(() -> {
+            if (generation != remoteSessionGeneration || !started || remoteStatus == null) return;
+            if (remoteConnection == connection || (remoteConnection == null && state == null)) {
+                updateRemoteIme(state);
+            }
+        }));
     }
 
     private void closeSystemRemote() {

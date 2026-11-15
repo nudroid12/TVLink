@@ -141,11 +141,36 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     void start(java.util.function.Consumer<String> log) throws IOException {
+        start(log, null);
+    }
+
+    private static final int IME_FEATURE = 1 << 2;
+    private java.util.function.Consumer<ImeState> imeListener;
+    private ImeState imeState;
+
+    static final class ImeState {
+        final int field;
+        final int counter;
+        final int inputType;
+        final String text;
+
+        ImeState(int field, int counter, int inputType, String text) {
+            this.field = field;
+            this.counter = counter;
+            this.inputType = inputType;
+            this.text = text;
+        }
+    }
+
+    void start(java.util.function.Consumer<String> log,
+               java.util.function.Consumer<ImeState> listener) throws IOException {
+        imeListener = listener;
         final int ping = 1;
         final int keys = 1 << 1;
         final int power = 1 << 5;
         final int volume = 1 << 6;
         int features = ping | keys | power | volume;
+        if (listener != null) features |= IME_FEATURE;
         boolean configured = false;
         int frames = 0;
         boolean activated = false;
@@ -178,6 +203,7 @@ final class AndroidTvRemote implements AutoCloseable {
             }
             if (message.containsKey(3)) throw new IOException("TV rejected remote connection");
             pong(message);
+            handleIme(message);
             if (message.containsKey(8)) log.accept("TV keepalive received and answered.");
             if (message.containsKey(40)) {
                 startKeepalive();
@@ -198,11 +224,66 @@ final class AndroidTvRemote implements AutoCloseable {
         socket.setSoTimeout(16000);
         new Thread(() -> {
             try {
-                while (!closed) pong(read());
+                while (!closed) {
+                    Map<Integer, Object> message = read();
+                    pong(message);
+                    handleIme(message);
+                }
             } catch (IOException ignored) {
                 close();
             }
         }, "TVLink remote keepalive").start();
+    }
+
+    private synchronized void handleIme(Map<Integer, Object> message) throws IOException {
+        if (imeListener == null || closed) return;
+        if (message.containsKey(20)) {
+            Map<Integer, Object> ime = nested(message, 20);
+            Map<Integer, Object> editor = nested(ime, 1);
+            Map<Integer, Object> status = nested(ime, 2);
+            int field = integer(editor, 1);
+            int type = integer(editor, 2);
+            imeState = field == 0 || type == 0 ? null
+                    : new ImeState(field, integer(status, 1), type, readText(status, 2));
+            imeListener.accept(imeState);
+        } else if (imeState != null && message.containsKey(22)) {
+            Map<Integer, Object> payload = nested(message, 22);
+            Map<Integer, Object> status = nested(payload, 2);
+            if (status.isEmpty()) return;
+            boolean ownChange = integer(payload, 1) != 0;
+            imeState = new ImeState(imeState.field, integer(status, 1), imeState.inputType,
+                    ownChange ? imeState.text : readText(status, 2));
+            if (!ownChange) imeListener.accept(imeState);
+        }
+    }
+
+    synchronized boolean replaceImeText(int fieldId, String value) throws IOException {
+        if (closed || imeState == null || imeState.field != fieldId) return false;
+        if (imeState.text.equals(value)) return true;
+        write(field(21, imeEdit(imeState, value)));
+        imeState = new ImeState(imeState.field, imeState.counter, imeState.inputType, value);
+        return true;
+    }
+
+    static byte[] imeEdit(ImeState state, String value) {
+        byte[] range = concat(number(1, 0), number(2, state.text.length()), string(3, value));
+        return concat(number(1, state.field), number(2, state.counter), field(3, field(2, range)));
+    }
+
+    private static Map<Integer, Object> nested(Map<Integer, Object> fields, int id) throws IOException {
+        Object value = fields.get(id);
+        return value instanceof byte[] ? parse((byte[]) value) : java.util.Collections.emptyMap();
+    }
+
+    private static int integer(Map<Integer, Object> fields, int id) {
+        Object value = fields.get(id);
+        return value instanceof Integer ? (Integer) value : 0;
+    }
+
+    private static String readText(Map<Integer, Object> fields, int id) {
+        Object value = fields.get(id);
+        return value instanceof byte[]
+                ? new String((byte[]) value, java.nio.charset.StandardCharsets.UTF_8) : "";
     }
 
     private void pong(Map<Integer, Object> message) throws IOException {
@@ -292,5 +373,6 @@ final class AndroidTvRemote implements AutoCloseable {
     @Override public void close() {
         closed = true;
         try { socket.close(); } catch (IOException ignored) {}
+        if (imeListener != null) imeListener.accept(null);
     }
 }
