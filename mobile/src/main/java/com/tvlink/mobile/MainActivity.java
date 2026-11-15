@@ -92,6 +92,10 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen(String title) {
+        if (transferRefresh != null) {
+            receiverHandler.removeCallbacks(transferRefresh);
+            transferRefresh = null;
+        }
         if (remoteStatus != null) {
             suspendRemoteSession();
             remoteStatus = null;
@@ -760,6 +764,8 @@ public class MainActivity extends Activity {
         return heading;
     }
 
+    private Runnable transferRefresh;
+
     private void addTransferDetails(LinearLayout body, LinearLayout receive) {
         TextView status = info(receive, "");
         status.setTextColor(Color.WHITE);
@@ -777,11 +783,11 @@ public class MainActivity extends Activity {
         java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance(
                 java.text.DateFormat.SHORT, java.text.DateFormat.SHORT);
         java.util.regex.Pattern percent = java.util.regex.Pattern.compile(" · (\\d{1,3})%$");
-        Runnable refresh = new Runnable() {
+        transferRefresh = new Runnable() {
             private String lastHistory;
 
             @Override public void run() {
-                if (!body.isAttachedToWindow()) return;
+                if (!started || transferRefresh != this) return;
                 boolean enabled = prefs.getBoolean("receive", true);
                 boolean paired = hasFilePairing();
                 String incoming = receiver == null ? "" : receiver.receiveProgress;
@@ -820,10 +826,10 @@ public class MainActivity extends Activity {
                         if (index + 1 < entries.length()) divider(history);
                     }
                 }
-                body.postDelayed(this, 500);
+                receiverHandler.postDelayed(this, 500);
             }
         };
-        body.post(refresh);
+        if (started) receiverHandler.post(transferRefresh);
     }
 
     private void finishSend(SendSession session, String outcome) {
@@ -1849,6 +1855,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onStop() {
         started = false;
+        if (transferRefresh != null) receiverHandler.removeCallbacks(transferRefresh);
         if (remoteStatus != null) suspendRemoteSession();
         receiverHandler.removeCallbacks(retryReceiver);
         closeReceiver();
@@ -1860,6 +1867,7 @@ public class MainActivity extends Activity {
         started = true;
         if (remoteStatus != null) connectRemoteScreen(remoteStatus);
         startReceiver();
+        if (transferRefresh != null) receiverHandler.post(transferRefresh);
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String token = prefs.getString("link_token", "");
         String host = prefs.getString("remote_host", "");

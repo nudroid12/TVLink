@@ -34,6 +34,10 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen() {
+        if (transferRefresh != null) {
+            refresh.removeCallbacks(transferRefresh);
+            transferRefresh = null;
+        }
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
@@ -643,6 +647,9 @@ public class MainActivity extends Activity {
         return heading;
     }
 
+    private boolean started;
+    private Runnable transferRefresh;
+
     private void addTransferDetails(LinearLayout body, LinearLayout receive) {
         TextView status = info(receive, "");
         status.setTextColor(Color.WHITE);
@@ -660,11 +667,11 @@ public class MainActivity extends Activity {
         java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance(
                 java.text.DateFormat.SHORT, java.text.DateFormat.SHORT);
         java.util.regex.Pattern percent = java.util.regex.Pattern.compile(" · (\\d{1,3})%$");
-        Runnable refresh = new Runnable() {
+        transferRefresh = new Runnable() {
             private String lastHistory;
 
             @Override public void run() {
-                if (!body.isAttachedToWindow()) return;
+                if (!started || transferRefresh != this) return;
                 boolean enabled = prefs.getBoolean("receive", true);
                 boolean paired = isLinked();
                 String incoming = receiver == null ? "" : receiver.receiveProgress;
@@ -703,10 +710,10 @@ public class MainActivity extends Activity {
                         if (index + 1 < entries.length()) divider(history);
                     }
                 }
-                body.postDelayed(this, 500);
+                refresh.postDelayed(this, 500);
             }
         };
-        body.post(refresh);
+        if (started) refresh.post(transferRefresh);
     }
 
     private void finishSend(SendSession session, String outcome) {
@@ -1068,6 +1075,8 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        started = false;
+        if (transferRefresh != null) refresh.removeCallbacks(transferRefresh);
         // Android TV's pairing dialog can briefly cover this activity.
         if (pairing == null) closeReceiver();
         super.onStop();
@@ -1075,10 +1084,12 @@ public class MainActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart();
+        started = true;
         if (isLinked()) {
             startReceiver();
             recoverDeviceName();
         }
+        if (transferRefresh != null) refresh.post(transferRefresh);
     }
 
     private void recoverDeviceName() {
