@@ -185,7 +185,14 @@ jobs:
             [[ "$VERSION_CODE" =~ ^[0-9]+$ && -n "$VERSION_NAME" ]]
             asset="TVLink-${module^^}-$VERSION_CODE.apk"
             existing="$(gh release view tvlink-dev --json assets --jq '.assets[].name')"
-            if ! grep -Fxq -- "$asset" <<< "$existing"; then
+            if grep -Fxq -- "$asset" <<< "$existing"; then
+              published_apk="dist/published-$asset"
+              gh release download tvlink-dev --pattern "$asset" --output "$published_apk" --clobber
+              if ! cmp -s "$apk" "$published_apk"; then
+                echo "::error::Published $asset differs from this build. Increase $module versionCode before publishing."
+                exit 1
+              fi
+            else
               cp "$apk" "dist/$asset"
               gh release upload tvlink-dev "dist/$asset"
             fi
