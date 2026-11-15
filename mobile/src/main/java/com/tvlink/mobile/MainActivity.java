@@ -44,6 +44,47 @@ public class MainActivity extends Activity {
         getPreferences(MODE_PRIVATE).edit().remove("transfer_history").apply();
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
+        if (state == null) handleSharedFile(getIntent());
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleSharedFile(intent);
+    }
+
+    private void handleSharedFile(Intent intent) {
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+        android.net.Uri uri;
+        try {
+            Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (stream instanceof android.net.Uri) uri = (android.net.Uri) stream;
+            else {
+                android.content.ClipData clip = intent.getClipData();
+                uri = clip != null && clip.getItemCount() == 1 ? clip.getItemAt(0).getUri() : null;
+            }
+        } catch (RuntimeException error) {
+            notifyUser("Could not read the shared file.");
+            return;
+        }
+        if (uri == null || !"content".equals(uri.getScheme())
+                || checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            notifyUser("Share a file from your file manager.");
+            return;
+        }
+        if (activeSend != null || remotePairing) {
+            notifyUser("Finish the current transfer or pairing first.");
+            return;
+        }
+        Runnable confirm = () -> {
+            if (isFinishing() || isDestroyed()) return;
+            new AlertDialog.Builder(this).setTitle("Send shared file?")
+                    .setMessage("Send the selected file to " + linkedTvName() + ".")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Send", (dialog, which) -> sendFileUri(uri)).show();
+        };
+        if (hasFilePairing()) confirm.run();
+        else pairSystemRemote(confirm);
     }
 
     private int dp(int size) {
@@ -290,8 +331,10 @@ public class MainActivity extends Activity {
         } else if (receiver == null) {
             try {
                 receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE),
-                        transferHistory, () -> runOnUiThread(() -> {
-                            if (started && !isFinishing() && !isDestroyed() && !showingTransfers) showTransfers();
+                        transferHistory, filename -> runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            notifyUser("File received: " + filename);
+                            if (started && !showingTransfers) showTransfers();
                         }));
                 receiverError = null;
             } catch (IOException | SecurityException error) {
@@ -636,7 +679,10 @@ public class MainActivity extends Activity {
             return;
         }
         if (request != 10 || result != RESULT_OK || data == null || data.getData() == null) return;
-        android.net.Uri uri = data.getData();
+        sendFileUri(data.getData());
+    }
+
+    private void sendFileUri(android.net.Uri uri) {
         SendSession session = beginSend();
         if (session == null) return;
         io.execute(() -> {

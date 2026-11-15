@@ -17,10 +17,10 @@ final class TransferServer implements AutoCloseable {
     private volatile boolean closed;
     private final android.content.SharedPreferences settings;
     private final TransferHistory history;
-    private final Runnable onReceived;
+    private final java.util.function.Consumer<String> onReceived;
 
     TransferServer(File folder, File identityDirectory, android.content.SharedPreferences settings,
-                   TransferHistory history, Runnable onReceived) throws IOException {
+                   TransferHistory history, java.util.function.Consumer<String> onReceived) throws IOException {
         this.folder = folder;
         this.identityDirectory = identityDirectory;
         this.settings = settings;
@@ -159,7 +159,7 @@ final class TransferServer implements AutoCloseable {
             }
             history.add("Received: " + target.getName());
             receiveProgress = "";
-            onReceived.run();
+            onReceived.accept(target.getName());
             out.writeUTF("OK");
         } catch (IOException error) {
             history.add("Receive failed: " + target.getName() + " · " + error.getMessage());
