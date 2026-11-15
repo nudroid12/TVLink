@@ -267,7 +267,7 @@ final class TransferServer implements AutoCloseable {
                 }
                 if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
             }
-            TransferHistory.add(settings, "Received: " + target.getName());
+            TransferHistory.add(settings, "Received: " + target.getName(), settings.getString("peer_name", ""), total);
             out.writeUTF("OK");
         } catch (IOException error) {
             TransferHistory.add(settings, "Receive failed: " + target.getName() + " · " + error.getMessage());

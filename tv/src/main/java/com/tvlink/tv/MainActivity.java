@@ -34,6 +34,11 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen() {
+        exitDeadline = 0;
+        if (exitMessage != null) {
+            exitMessage.cancel();
+            exitMessage = null;
+        }
         if (transferRefresh != null) {
             refresh.removeCallbacks(transferRefresh);
             transferRefresh = null;
@@ -142,6 +147,7 @@ public class MainActivity extends Activity {
         boolean linked = isLinked();
         if (pairedHeader != null) {
             pairedHeader.setText(linked ? peerName() : "Pair");
+            pairedHeader.setGravity(linked ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
             pairedHeader.setCompoundDrawablesRelativeWithIntrinsicBounds(
                     linked ? R.drawable.ic_phone : 0, 0, 0, 0);
         }
@@ -172,7 +178,6 @@ public class MainActivity extends Activity {
         Button pair = button(isLinked() ? peerName() : "Pair", this::showLinkStatus);
         pairedHeader = pair;
         pair.setMinWidth(0);
-        pair.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         pair.setCompoundDrawablePadding(dp(6));
         pair.setPadding(dp(12), 0, dp(12), 0);
         updateDeviceLabels();
@@ -188,8 +193,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams gearSize = new LinearLayout.LayoutParams(dp(44), dp(44));
         gearSize.setMarginStart(dp(8));
         header.addView(gear, gearSize);
-        if (pairingIntro) divider(page, CONTENT_DIVIDER);
-        else divider(page);
+        divider(page);
     }
 
     private LinearLayout feature(String title) {
@@ -411,12 +415,9 @@ public class MainActivity extends Activity {
     private static final int CONTENT_DIVIDER = 0xff34425a;
 
     private void divider(LinearLayout page) {
-        divider(page, 0xff82aaff);
-    }
 
-    private void divider(LinearLayout page, int color) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(color);
+        line.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -626,7 +627,7 @@ public class MainActivity extends Activity {
         send.addView(sendFile, new LinearLayout.LayoutParams(dp(160), dp(48)));
 
         android.view.View rule = new android.view.View(this);
-        rule.setBackgroundColor(0xff82aaff);
+        rule.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams ruleSize = new LinearLayout.LayoutParams(dp(1), -1);
         ruleSize.setMargins(dp(20), 0, dp(20), 0);
         columns.addView(rule, ruleSize);
@@ -677,6 +678,8 @@ public class MainActivity extends Activity {
         final java.net.Socket socket = new java.net.Socket();
         final AlertDialog dialog;
         volatile boolean cancelled;
+        String peer;
+        long size = -1;
 
         SendSession(AlertDialog dialog) { this.dialog = dialog; }
 
@@ -773,10 +776,7 @@ public class MainActivity extends Activity {
                     for (int index = 0; index < entries.length(); index++) {
                         org.json.JSONObject item = entries.optJSONObject(index);
                         if (item == null) continue;
-                        TextView row = info(history, item.optString("outcome") + "\n"
-                                + dates.format(new java.util.Date(item.optLong("time"))));
-                        row.setTextColor(Color.WHITE);
-                        if (index + 1 < entries.length()) divider(history);
+                        TransferHistory.addCard(MainActivity.this, history, item, dates);
                     }
                 }
                 refresh.postDelayed(this, 500);
@@ -786,7 +786,7 @@ public class MainActivity extends Activity {
     }
 
     private void finishSend(SendSession session, String outcome) {
-        TransferHistory.add(getPreferences(MODE_PRIVATE), outcome);
+        TransferHistory.add(getPreferences(MODE_PRIVATE), outcome, session.peer, session.size);
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
@@ -803,6 +803,8 @@ public class MainActivity extends Activity {
 
     private void sendToPeer(SendSession session, String host, String token, String name, long size, InputStream stream)
             throws IOException {
+        session.peer = peerName();
+        session.size = size;
         if (stream == null) throw new IOException("Cannot read file");
         if (session.cancelled) throw new IOException("Transfer cancelled");
         runOnUiThread(() -> {
@@ -913,7 +915,7 @@ public class MainActivity extends Activity {
             newestFirst = !newestFirst;
             renderFiles();
         });
-        divider(body, CONTENT_DIVIDER);
+        divider(body);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
@@ -1008,7 +1010,7 @@ public class MainActivity extends Activity {
         row.addView(date);
         size.setTextColor(0xffb8c3d6);
         date.setTextColor(0xffb8c3d6);
-        divider(body, CONTENT_DIVIDER);
+        divider(body);
     }
 
     private void fileActions(File file, android.view.View source) {
@@ -1144,6 +1146,11 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        exitDeadline = 0;
+        if (exitMessage != null) {
+            exitMessage.cancel();
+            exitMessage = null;
+        }
         started = false;
         if (transferRefresh != null) refresh.removeCallbacks(transferRefresh);
         // Android TV's pairing dialog can briefly cover this activity.
@@ -1192,8 +1199,23 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private long exitDeadline;
+    private Toast exitMessage;
+
+    private void confirmBackExit() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (exitDeadline > now) {
+            finish();
+            return;
+        }
+        exitDeadline = now + 2000;
+        if (exitMessage != null) exitMessage.cancel();
+        exitMessage = Toast.makeText(this, "Press again to exit", Toast.LENGTH_SHORT);
+        exitMessage.show();
+    }
+
     @Override public void onBackPressed() {
-        if (showingHome) super.onBackPressed();
+        if (showingHome) confirmBackExit();
         else if (storageFolder != null) {
             if (storageFolder.equals(storageRoot)) showFiles();
             else {

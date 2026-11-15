@@ -92,6 +92,11 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen(String title) {
+        exitDeadline = 0;
+        if (exitMessage != null) {
+            exitMessage.cancel();
+            exitMessage = null;
+        }
         if (transferRefresh != null) {
             receiverHandler.removeCallbacks(transferRefresh);
             transferRefresh = null;
@@ -306,12 +311,9 @@ public class MainActivity extends Activity {
     private static final int CONTENT_DIVIDER = 0xff34425a;
 
     private void divider(LinearLayout page) {
-        divider(page, REMOTE_OUTLINE);
-    }
 
-    private void divider(LinearLayout page, int color) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(color);
+        line.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -429,6 +431,7 @@ public class MainActivity extends Activity {
 
         Button pair = button(linked ? linkedTvName() : "Pair", this::showDevice);
         homePair = pair;
+        pair.setGravity(Gravity.CENTER);
         pair.setMinHeight(dp(48));
         pair.setMinWidth(0);
         pair.setMaxWidth(dp(Math.max(48, screenWidth - logoWidth - 112)));
@@ -450,7 +453,7 @@ public class MainActivity extends Activity {
         header.addView(settings, settingsSize);
 
         android.view.View divider = new android.view.View(this);
-        divider.setBackgroundColor(REMOTE_OUTLINE);
+        divider.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(-1, dp(1));
         line.setMargins(0, dp(14), 0, dp(18));
         page.addView(divider, line);
@@ -762,6 +765,8 @@ public class MainActivity extends Activity {
         final java.net.Socket socket = new java.net.Socket();
         final AlertDialog dialog;
         volatile boolean cancelled;
+        String peer;
+        long size = -1;
 
         SendSession(AlertDialog dialog) { this.dialog = dialog; }
 
@@ -857,10 +862,7 @@ public class MainActivity extends Activity {
                     for (int index = 0; index < entries.length(); index++) {
                         org.json.JSONObject item = entries.optJSONObject(index);
                         if (item == null) continue;
-                        TextView row = info(history, item.optString("outcome") + "\n"
-                                + dates.format(new java.util.Date(item.optLong("time"))));
-                        row.setTextColor(Color.WHITE);
-                        if (index + 1 < entries.length()) divider(history);
+                        TransferHistory.addCard(MainActivity.this, history, item, dates);
                     }
                 }
                 receiverHandler.postDelayed(this, 500);
@@ -870,7 +872,7 @@ public class MainActivity extends Activity {
     }
 
     private void finishSend(SendSession session, String outcome) {
-        transferHistory.add(outcome);
+        transferHistory.add(outcome, session.peer, session.size);
         runOnUiThread(() -> {
             if (activeSend == session) activeSend = null;
             session.dialog.dismiss();
@@ -880,6 +882,8 @@ public class MainActivity extends Activity {
 
     private void sendToPeer(SendSession session, String host, String token, String name, long size, InputStream stream)
             throws IOException {
+        session.peer = linkedTvName();
+        session.size = size;
         if (stream == null) throw new IOException("Cannot read file");
         if (session.cancelled) throw new IOException("Transfer cancelled");
         runOnUiThread(() -> {
@@ -943,7 +947,7 @@ public class MainActivity extends Activity {
         page.addView(tabs, new LinearLayout.LayoutParams(-1, -2));
         addFileTab(tabs, "Received", !onTv, this::showLocalFiles);
         addFileTab(tabs, "On TV", onTv, this::showTvFiles);
-        divider(page, CONTENT_DIVIDER);
+        divider(page);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -1000,7 +1004,7 @@ public class MainActivity extends Activity {
         row.setOnClickListener(view -> fileActions(file));
         row.setBackground(flatRowBackground());
         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
-        divider(body, CONTENT_DIVIDER);
+        divider(body);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_document);
@@ -1181,7 +1185,7 @@ public class MainActivity extends Activity {
                         row.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_document, 0, 0, 0);
                         row.setCompoundDrawablePadding(dp(12));
                         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
-                        divider(body, CONTENT_DIVIDER);
+                        divider(body);
                     }
                 });
             } catch (IOException error) {
@@ -1229,7 +1233,6 @@ public class MainActivity extends Activity {
 
     private static final int REMOTE_NAVY = 0xff0b1329;
     private static final int REMOTE_BLUE = 0xffaec0ff;
-    private static final int REMOTE_OUTLINE = 0xff82aaff;
 
     private void showRemote() {
         showingHome = false;
@@ -1924,6 +1927,11 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        exitDeadline = 0;
+        if (exitMessage != null) {
+            exitMessage.cancel();
+            exitMessage = null;
+        }
         started = false;
         if (transferRefresh != null) receiverHandler.removeCallbacks(transferRefresh);
         if (remoteStatus != null) suspendRemoteSession();
@@ -1960,8 +1968,23 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private long exitDeadline;
+    private Toast exitMessage;
+
+    private void confirmBackExit() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (exitDeadline > now) {
+            finish();
+            return;
+        }
+        exitDeadline = now + 2000;
+        if (exitMessage != null) exitMessage.cancel();
+        exitMessage = Toast.makeText(this, "Press again to exit", Toast.LENGTH_SHORT);
+        exitMessage.show();
+    }
+
     @Override public void onBackPressed() {
-        if (showingHome) super.onBackPressed();
+        if (showingHome) confirmBackExit();
         else home();
     }
 }
