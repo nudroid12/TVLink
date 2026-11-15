@@ -251,7 +251,7 @@ public class MainActivity extends Activity {
         }
 
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(0xff34425a);
+        line.setBackgroundColor(CONTENT_DIVIDER);
         rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
@@ -303,9 +303,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int CONTENT_DIVIDER = 0xff34425a;
+
     private void divider(LinearLayout page) {
+        divider(page, REMOTE_OUTLINE);
+    }
+
+    private void divider(LinearLayout page, int color) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(REMOTE_OUTLINE);
+        line.setBackgroundColor(color);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -906,7 +912,7 @@ public class MainActivity extends Activity {
         page.addView(tabs, new LinearLayout.LayoutParams(-1, -2));
         addFileTab(tabs, "Received", !onTv, this::showLocalFiles);
         addFileTab(tabs, "On TV", onTv, this::showTvFiles);
-        divider(page);
+        divider(page, CONTENT_DIVIDER);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -963,7 +969,7 @@ public class MainActivity extends Activity {
         row.setOnClickListener(view -> fileActions(file));
         row.setBackground(flatRowBackground());
         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
-        divider(body);
+        divider(body, CONTENT_DIVIDER);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_document);
@@ -1144,7 +1150,7 @@ public class MainActivity extends Activity {
                         row.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_document, 0, 0, 0);
                         row.setCompoundDrawablePadding(dp(12));
                         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
-                        divider(body);
+                        divider(body, CONTENT_DIVIDER);
                     }
                 });
             } catch (IOException error) {

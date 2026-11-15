@@ -347,7 +347,7 @@ public class MainActivity extends Activity {
             row.addView(control, size);
         }
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(0xff34425a);
+        line.setBackgroundColor(CONTENT_DIVIDER);
         rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
@@ -399,9 +399,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int CONTENT_DIVIDER = 0xff34425a;
+
     private void divider(LinearLayout page) {
+        divider(page, 0xff82aaff);
+    }
+
+    private void divider(LinearLayout page, int color) {
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(0xff82aaff);
+        line.setBackgroundColor(color);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -844,7 +850,7 @@ public class MainActivity extends Activity {
             newestFirst = !newestFirst;
             renderFiles();
         });
-        divider(body);
+        divider(body, CONTENT_DIVIDER);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
@@ -939,7 +945,7 @@ public class MainActivity extends Activity {
         row.addView(date);
         size.setTextColor(0xffb8c3d6);
         date.setTextColor(0xffb8c3d6);
-        divider(body);
+        divider(body, CONTENT_DIVIDER);
     }
 
     private void fileActions(File file, android.view.View source) {
