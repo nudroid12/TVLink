@@ -43,7 +43,6 @@ public class MainActivity extends Activity {
         setTheme(R.style.TVLinkTheme);
         super.onCreate(state);
         if (state != null) exportName = state.getString("export_name");
-        getPreferences(MODE_PRIVATE).edit().remove("transfer_history").apply();
         getPreferences(MODE_PRIVATE).registerOnSharedPreferenceChangeListener(deviceListener);
         home();
         if (state == null) handleSharedFile(getIntent());
