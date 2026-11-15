@@ -580,10 +580,7 @@ public class MainActivity extends Activity {
     private void showDevice() {
         LinearLayout body = feature("Device");
         if (!hasRemotePairing()) {
-            info(body, "Keep your Android TV on and connected to the same network.");
-            body.addView(button("Find TV", () -> {
-                if (!busy) findPairingTv(this::showDevice, false);
-            }));
+            addDevicePairingIntro(body);
             return;
         }
 
@@ -618,6 +615,40 @@ public class MainActivity extends Activity {
     private String linkedTvName() {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         return prefs.getString("peer_name", prefs.getString("remote_name", "Linked TV"));
+    }
+
+    private void addDevicePairingIntro(LinearLayout body) {
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setPadding(0, dp(48), 0, dp(24));
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_pair_devices);
+        body.addView(icon, new LinearLayout.LayoutParams(dp(136), dp(68)));
+
+        TextView heading = new TextView(this);
+        heading.setText("Pair with your TV");
+        heading.setTextSize(24);
+        heading.setTextColor(Color.WHITE);
+        heading.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleSize = new LinearLayout.LayoutParams(-1, -2);
+        titleSize.topMargin = dp(16);
+        body.addView(heading, titleSize);
+
+        TextView detail = info(body, "Open TVLink on your TV.\nConnect both devices to the same network.");
+        detail.setTextSize(16);
+        detail.setGravity(Gravity.CENTER);
+        detail.setTextColor(0xffb8c3d6);
+
+        LinearLayout actions = new LinearLayout(this);
+        LinearLayout.LayoutParams actionsSize = new LinearLayout.LayoutParams(-1, -2);
+        actionsSize.topMargin = dp(16);
+        body.addView(actions, actionsSize);
+        actions.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        Button find = button("Find TV", () -> {
+            if (!busy) findPairingTv(this::showDevice, false);
+        });
+        actions.addView(find, new LinearLayout.LayoutParams(0, dp(48), 5));
+        actions.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
     }
 
     private void confirmUnpair() {

@@ -112,7 +112,9 @@ public class MainActivity extends Activity {
                 if (pairingFromDevicePage) showLinkStatus();
                 else showReceive();
             } else if (receiver != null) {
-                pairing.setText(receiver.pairingStatus());
+                String status = receiver.pairingStatus();
+                pairing.setText(pairingFromDevicePage && "Ready to pair".equals(status)
+                        ? "Waiting for your phone…" : status);
                 showFileApproval();
                 refresh.postDelayed(this, 400);
             }
@@ -157,7 +159,7 @@ public class MainActivity extends Activity {
         return getPreferences(MODE_PRIVATE).getString("peer_name", "Name unavailable");
     }
 
-    private void addHeader(LinearLayout page) {
+    private void addHeader(LinearLayout page, boolean pairingIntro) {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -178,6 +180,7 @@ public class MainActivity extends Activity {
         pair.setSingleLine(true);
         pair.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(pair, new LinearLayout.LayoutParams(-2, dp(44)));
+        pair.setVisibility(pairingIntro ? android.view.View.GONE : android.view.View.VISIBLE);
         Button gear = button("", this::showSettings);
         gear.setContentDescription("Settings");
         gear.setCompoundDrawablesWithIntrinsicBounds(0, R.drawable.ic_settings, 0, 0);
@@ -185,14 +188,16 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams gearSize = new LinearLayout.LayoutParams(dp(44), dp(44));
         gearSize.setMarginStart(dp(8));
         header.addView(gear, gearSize);
-        divider(page);
+        if (pairingIntro) divider(page, CONTENT_DIVIDER);
+        else divider(page);
     }
 
     private LinearLayout feature(String title) {
         showingHome = false;
         stopPairingDisplay();
         LinearLayout page = screen();
-        addHeader(page);
+        boolean pairingIntro = !isLinked() && ("Remote".equals(title) || "Pair".equals(title));
+        addHeader(page, pairingIntro);
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -220,7 +225,7 @@ public class MainActivity extends Activity {
         showingHome = true;
         stopPairingDisplay();
         LinearLayout page = screen();
-        addHeader(page);
+        addHeader(page, false);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         page.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -257,8 +262,12 @@ public class MainActivity extends Activity {
 
     private void showRemoteHelp() {
         LinearLayout body = feature("Remote");
-        info(body, "Use Remote in TVLink on your phone to control this TV.");
-        showDevice(body);
+        if (isLinked()) {
+            info(body, "Use Remote in TVLink on your phone to control this TV.");
+            showDevice(body);
+        } else {
+            addUnlinkedDevice(body);
+        }
     }
 
     private String appVersion() {
@@ -441,11 +450,7 @@ public class MainActivity extends Activity {
     private void showLinkStatus() {
         LinearLayout body = feature("Pair");
         if (isLinked()) showDevice(body);
-        else {
-            info(body, "Device:");
-            info(body, "No phone linked.");
-            startPairing(body, true);
-        }
+        else startPairing(body, true);
     }
 
     private void showDevice(LinearLayout body) {
@@ -476,8 +481,40 @@ public class MainActivity extends Activity {
     }
 
     private void addUnlinkedDevice(LinearLayout body) {
-        info(body, "No phone linked.");
-        body.addView(button("Pair", this::showLinkStatus));
+        addPairingIntro(body, "Use TVLink on your phone to control this TV.");
+        Button action = button("Pair phone", this::showLinkStatus);
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_focused}, tile(0xff121d33, true));
+        background.addState(new int[] {}, tile(0xff121d33, false));
+        action.setBackground(background);
+        action.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(320), dp(48));
+        size.topMargin = dp(18);
+        body.addView(action, size);
+        action.requestFocus();
+    }
+
+    private void addPairingIntro(LinearLayout body, String instruction) {
+        ((ScrollView) body.getParent()).setFillViewport(true);
+        body.setGravity(Gravity.CENTER);
+        body.setPadding(0, dp(12), 0, dp(28));
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_pair_devices);
+        body.addView(icon, new LinearLayout.LayoutParams(dp(132), dp(66)));
+
+        TextView heading = new TextView(this);
+        heading.setText("Pair your phone");
+        heading.setTextSize(28);
+        heading.setTextColor(Color.WHITE);
+        heading.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleSize = new LinearLayout.LayoutParams(-1, -2);
+        titleSize.topMargin = dp(14);
+        body.addView(heading, titleSize);
+
+        TextView detail = info(body, instruction);
+        detail.setGravity(Gravity.CENTER);
+        detail.setTextSize(18);
+        detail.setTextColor(0xffb8c3d6);
     }
 
     private void unpairPhone() {
@@ -499,11 +536,37 @@ public class MainActivity extends Activity {
 
     private void startPairing(LinearLayout body, boolean fromDevicePage) {
         pairingFromDevicePage = fromDevicePage;
-        if (!startReceiver()) return;
-        info(body, "On your phone, tap Pair → Find TV. Keep this TV screen open.");
+        if (fromDevicePage) {
+            addPairingIntro(body, "On your phone, open TVLink\nSelect Pair → Find TV");
+        }
+        if (!startReceiver()) {
+            if (fromDevicePage) {
+                TextView error = info(body, "Could not start pairing. Press Back and reopen Pair.");
+                error.setGravity(Gravity.CENTER);
+            }
+            return;
+        }
+        if (!fromDevicePage) {
+            info(body, "On your phone, tap Pair → Find TV. Keep this TV screen open.");
+        }
         pairing = new TextView(this);
-        pairing.setText("Ready to pair");
-        body.addView(pairing);
+        pairing.setText(fromDevicePage ? "Waiting for your phone…" : "Ready to pair");
+        if (fromDevicePage) {
+            pairing.setGravity(Gravity.CENTER);
+            pairing.setTextSize(16);
+            pairing.setTextColor(0xffa9c8ff);
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(FOCUS_BLUE);
+            dot.setBounds(0, 0, dp(8), dp(8));
+            pairing.setCompoundDrawablesRelative(dot, null, null, null);
+            pairing.setCompoundDrawablePadding(dp(10));
+            LinearLayout.LayoutParams statusSize = new LinearLayout.LayoutParams(-2, -2);
+            statusSize.topMargin = dp(8);
+            body.addView(pairing, statusSize);
+        } else {
+            body.addView(pairing);
+        }
         receiver.enableLinking(true);
         refresh.postDelayed(updatePairing, 400);
         refresh.postDelayed(expireLink, 180000);
