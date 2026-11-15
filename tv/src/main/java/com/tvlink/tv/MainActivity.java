@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff82aaff);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : CONTENT_DIVIDER);
         return shape;
     }
 

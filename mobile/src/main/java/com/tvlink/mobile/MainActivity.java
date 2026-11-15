@@ -120,7 +120,7 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : 0xff82aaff);
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : CONTENT_DIVIDER);
         return shape;
     }
 
@@ -1315,7 +1315,7 @@ public class MainActivity extends Activity {
         RemoteIconView button = new RemoteIconView(this, icon, label,
                 light || onPad ? REMOTE_NAVY : REMOTE_BLUE);
         button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_BLUE : REMOTE_NAVY,
-                light || onPad ? 0 : REMOTE_OUTLINE, radius));
+                light || onPad ? 0 : CONTENT_DIVIDER, radius));
         button.setOnClickListener(view -> action.run());
         return button;
     }
@@ -1396,12 +1396,9 @@ public class MainActivity extends Activity {
                     remotePairing = false;
                     if (isFinishing() || isDestroyed()) return;
                     if (discovered.isEmpty()) {
-                        new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("No TV found")
-                                .setMessage(linkFiles ? "Open Pair on your TV and check that both devices are on the same Wi-Fi."
-                                        : "Keep Android TV on and on the same network. You can also open Pair in TVLink on the TV.")
-                                .setNegativeButton("Cancel", null)
-                                .setPositiveButton("Try again", (dialog, choice) -> findPairingTv(paired, linkFiles))
-                                .show();
+                        String hint = linkFiles ? "Open Pair on your TV and check that both devices are on the same Wi-Fi."
+                                : "Keep Android TV on and on the same network. You can also open Pair in TVLink on the TV.";
+                        searching.failed("No TV found", new IOException(hint), () -> findPairingTv(paired, linkFiles));
                     } else if (discovered.size() == 1) {
                         java.util.Map.Entry<String, String> device = discovered.entrySet().iterator().next();
                         connectForPairing(device.getKey(), device.getValue(), paired, linkFiles);
@@ -1489,31 +1486,48 @@ public class MainActivity extends Activity {
             pairing.close();
             return;
         }
-        EditText code = new EditText(this);
+        TextView[] digits = new TextView[6];
+        LinearLayout boxes = new LinearLayout(this);
+        boxes.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        for (int index = 0; index < digits.length; index++) {
+            TextView digit = new TextView(this);
+            digit.setGravity(Gravity.CENTER);
+            digit.setTextSize(24);
+            digit.setTypeface(android.graphics.Typeface.MONOSPACE);
+            digit.setTextColor(Color.WHITE);
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, dp(48), 1);
+            if (index > 0) size.setMarginStart(dp(6));
+            boxes.addView(digit, size);
+            digits[index] = digit;
+        }
+
+        EditText code = new EditText(this) {
+            @Override protected void onSelectionChanged(int start, int end) {
+                super.onSelectionChanged(start, end);
+                updatePairingBoxes(this, digits);
+            }
+        };
         code.setSingleLine(true);
-        code.setHint("······");
-        code.setTextSize(27);
-        code.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
-        code.setLetterSpacing(0.24f);
-        code.setGravity(android.view.Gravity.CENTER);
+        code.setGravity(Gravity.CENTER);
         code.setContentDescription("Six-character Android TV pairing code");
-        code.setTextColor(0xfff4f6ff);
-        code.setHintTextColor(0xffc0cce4);
-        android.graphics.drawable.GradientDrawable field = new android.graphics.drawable.GradientDrawable();
-        field.setColor(0xff0e1728);
-        field.setCornerRadius(dp(12));
-        field.setStroke(dp(1), 0xff60769f);
-        code.setBackground(field);
-        LinearLayout codeContainer = new LinearLayout(this);
-        codeContainer.setPadding(dp(24), dp(12), dp(24), dp(8));
-        codeContainer.addView(code, new LinearLayout.LayoutParams(-1, dp(62)));
+        code.setTextColor(Color.TRANSPARENT);
+        code.setCursorVisible(false);
+        code.setBackgroundColor(Color.TRANSPARENT);
         code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
                 | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        code.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         code.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.AllCaps(),
-                new android.text.InputFilter.LengthFilter(6)});
-        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pair with Android TV")
-                .setMessage("Enter the 6-character code on your TV.")
+                new android.text.InputFilter.LengthFilter(digits.length)});
+
+        android.widget.FrameLayout input = new android.widget.FrameLayout(this);
+        input.addView(boxes, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        input.addView(code, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        LinearLayout codeContainer = new LinearLayout(this);
+        codeContainer.setPadding(dp(24), dp(16), dp(24), dp(8));
+        codeContainer.addView(input, new LinearLayout.LayoutParams(-1, dp(48)));
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog)
+                .setTitle("Enter the code shown on your TV")
                 .setView(codeContainer).setNegativeButton("Cancel", null)
                 .setPositiveButton("Pair", null).create();
         android.os.Handler timer = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -1525,9 +1539,9 @@ public class MainActivity extends Activity {
             remotePairing = false;
             if (!isDestroyed()) {
                 remoteIo.execute(() -> reportPairingStatus(host, "TIMED_OUT"));
-                new AlertDialog.Builder(this, R.style.TVLinkPairingDialog).setTitle("Pairing code timed out")
-                        .setNegativeButton("Close", null)
-                        .setPositiveButton("Try again", (d, w) -> findPairingTv(paired, linkFiles)).show();
+                PairingLog log = new PairingLog();
+                log.failed("Pairing code timed out", new IOException("The TV code was not submitted within 90 seconds."),
+                        () -> findPairingTv(paired, linkFiles));
             }
         };
         dialog.setOnDismissListener(ignored -> {
@@ -1536,25 +1550,32 @@ public class MainActivity extends Activity {
             remotePairing = false;
             if (!isDestroyed()) remoteIo.execute(() -> reportPairingStatus(host, "CANCELLED"));
         });
-        dialog.show();
-        timer.postDelayed(expire, 90000);
-        code.requestFocus();
+        code.setOnFocusChangeListener((view, focused) -> updatePairingBoxes(code, digits));
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
                 | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        code.requestFocus();
+        dialog.show();
+        timer.postDelayed(expire, 90000);
+        updatePairingBoxes(code, digits);
         Button pairButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         pairButton.setEnabled(false);
         code.addTextChangedListener(new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
             public void onTextChanged(CharSequence text, int start, int before, int count) {
                 pairButton.setEnabled(text.toString().matches("[0-9A-Fa-f]{6}"));
+                updatePairingBoxes(code, digits);
             }
             public void afterTextChanged(android.text.Editable text) {}
+        });
+        code.setOnEditorActionListener((view, action, event) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_DONE) return false;
+            if (pairButton.isEnabled()) pairButton.performClick();
+            return true;
         });
         pairButton.setOnClickListener(view -> {
             String value = code.getText().toString().trim();
             if (!value.matches("[0-9a-fA-F]{6}")) {
-                dialog.setMessage("The code needs 6 characters. You entered " + value.length()
-                        + ". Include any letters A–F shown on the TV.");
+                code.setError("Enter six characters using 0–9 and A–F.");
                 code.requestFocus();
                 return;
             }
@@ -1571,7 +1592,7 @@ public class MainActivity extends Activity {
                     remoteSaved = true;
                     reportPairingStatus(host, "PAIRED");
                     if (linkFiles) {
-                        progress.step("Remote paired. Connecting file transfer…");
+                        progress.loading("Connecting file transfer…");
                         finishLink(host, progress);
                     }
                     runOnUiThread(progress::dismiss);
@@ -1595,9 +1616,25 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void updatePairingBoxes(EditText code, TextView[] digits) {
+        CharSequence text = code.getText();
+        if (text == null) return;
+        int active = Math.min(Math.max(code.getSelectionEnd(), 0), digits.length - 1);
+        for (int index = 0; index < digits.length; index++) {
+            TextView digit = digits[index];
+            digit.setText(index < text.length() ? text.subSequence(index, index + 1) : "");
+            boolean focused = code.hasFocus() && active == index;
+            GradientDrawable border = new GradientDrawable();
+            border.setColor(0xff0e1728);
+            border.setCornerRadius(dp(8));
+            border.setStroke(dp(focused ? 2 : 1), focused ? FOCUS_BLUE : CONTENT_DIVIDER);
+            digit.setBackground(border);
+        }
+    }
+
     private PairingLog pairingProgress(String status) {
         PairingLog dialog = new PairingLog();
-        dialog.step(status);
+        dialog.loading(status);
         dialog.show();
         return dialog;
     }
@@ -1605,30 +1642,28 @@ public class MainActivity extends Activity {
     private final class PairingLog extends AlertDialog {
         private final long start = android.os.SystemClock.elapsedRealtime();
         private final StringBuilder entries = new StringBuilder();
-        private final TextView output = new TextView(MainActivity.this);
-        private final ScrollView scroll = new ScrollView(MainActivity.this);
-
-        private boolean closedByUser;
+        private final TextView status = new TextView(MainActivity.this);
 
         PairingLog() {
             super(MainActivity.this, R.style.TVLinkPairingDialog);
-            setTitle("Connecting");
             setCancelable(false);
-            setButton(BUTTON_NEGATIVE, "Close", (dialog, which) -> closedByUser = true);
-            setButton(BUTTON_NEUTRAL, "Copy log", (dialog, which) -> {});
-            output.setTypeface(android.graphics.Typeface.MONOSPACE);
-            output.setTextColor(0xffe4ecff);
-            output.setPadding(dp(24), dp(8), dp(24), dp(8));
-            scroll.addView(output);
-            LinearLayout container = new LinearLayout(MainActivity.this);
-            container.addView(scroll, new LinearLayout.LayoutParams(-1, dp(160)));
-            setView(container);
+            LinearLayout row = new LinearLayout(MainActivity.this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(24), dp(18), dp(24), dp(18));
+            android.widget.ProgressBar spinner = new android.widget.ProgressBar(MainActivity.this);
+            row.addView(spinner, new LinearLayout.LayoutParams(dp(24), dp(24)));
+            status.setTextColor(Color.WHITE);
+            status.setTextSize(16);
+            status.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            LinearLayout.LayoutParams labelSize = new LinearLayout.LayoutParams(0, -2, 1);
+            labelSize.setMarginStart(dp(16));
+            row.addView(status, labelSize);
+            setView(row);
         }
 
-        @Override public void show() {
-            if (closedByUser) return;
-            super.show();
-            getButton(BUTTON_NEUTRAL).setOnClickListener(view -> copyLog());
+        void loading(String message) {
+            step(message);
+            runOnUiThread(() -> status.setText(message));
         }
 
         private void copyLog() {
@@ -1646,8 +1681,6 @@ public class MainActivity extends Activity {
                 double seconds = (android.os.SystemClock.elapsedRealtime() - start) / 1000.0;
                 if (entries.length() > 0) entries.append('\n');
                 entries.append(String.format(java.util.Locale.ROOT, "[%.1fs] %s", seconds, message));
-                output.setText(entries);
-                scroll.post(() -> scroll.fullScroll(android.view.View.FOCUS_DOWN));
             });
         }
 
@@ -1756,7 +1789,7 @@ public class MainActivity extends Activity {
         if (!answer.get(55, java.util.concurrent.TimeUnit.SECONDS)) throw new IOException("File pairing cancelled");
         runOnUiThread(() -> {
             if (!isFinishing() && !isDestroyed()) {
-                progress.step("Phone approved. Waiting for Allow on TV…");
+                progress.loading("Waiting for approval on your TV…");
                 progress.show();
             }
         });
