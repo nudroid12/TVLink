@@ -1658,7 +1658,7 @@ public class MainActivity extends Activity {
                     remoteSaved = true;
                     reportPairingStatus(host, "PAIRED");
                     progress.loading("Connecting file transfer…");
-                    finishLink(host, progress);
+                    finishLink(host, progress, true);
                     runOnUiThread(progress::dismiss);
                     showLinkComplete(paired);
                 } catch (Exception error) {
@@ -1785,6 +1785,43 @@ public class MainActivity extends Activity {
     }
 
     private void finishLink(String host, PairingLog progress) throws Exception {
+        finishLink(host, progress, false);
+    }
+
+    private boolean tryRemoteFilePairing(String host, PairingLog progress) throws InterruptedException {
+        android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        try (AndroidTvRemote remote = new AndroidTvRemote(this, getNoBackupFilesDir(), host, false,
+                prefs.getString("remote_pin", ""), false, progress::step)) {
+            remote.start();
+            java.security.KeyPair key = FilePairing.keyPair();
+            String clientKey = FilePairing.encode(key.getPublic().getEncoded());
+            try (TransferClient client = new TransferClient(host, "PAIR_FILES_REMOTE", FilePairing.commitment(clientKey))) {
+                FilePairing.Result link = client.exchangeFileKeys(key, clientKey);
+                String secret = LinkKeys.newToken();
+                LinkKeys.send(remote, secret);
+                client.verifyRemoteLink(secret, link.token);
+                savePendingFileLink(host, link.token);
+                client.approveFileLink();
+                client.confirm();
+                return true;
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw error;
+        } catch (Exception error) {
+            progress.step("Remote verification unavailable. Using standard file approval.");
+            return false;
+        }
+    }
+
+    private void savePendingFileLink(String host, String token) throws IOException {
+        if (!getPreferences(MODE_PRIVATE).edit().putString("pending_file_host", host)
+                .putString("pending_file_token", token).commit()) {
+            throw new IOException("Could not save pending file pairing");
+        }
+    }
+
+    private void finishLink(String host, PairingLog progress, boolean tryRemote) throws Exception {
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String savedToken = prefs.getString("link_token", "");
         if (host.equals(prefs.getString("remote_host", "")) && !savedToken.isEmpty()
@@ -1792,9 +1829,11 @@ public class MainActivity extends Activity {
             syncDeviceName(host, savedToken);
             return;
         }
+        boolean remoteConfirmed = tryRemote && prefs.getString("pending_file_token", "").isEmpty()
+                && tryRemoteFilePairing(host, progress);
         String token = host.equals(prefs.getString("pending_file_host", ""))
                 ? prefs.getString("pending_file_token", "") : "";
-        if (token.isEmpty() || !confirmLink(host, token)) {
+        if (!remoteConfirmed && (token.isEmpty() || !confirmLink(host, token))) {
             java.security.KeyPair key = FilePairing.keyPair();
             String clientKey = FilePairing.encode(key.getPublic().getEncoded());
             progress.step("Opening encrypted connection to " + host + ":47832…");
@@ -1802,10 +1841,7 @@ public class MainActivity extends Activity {
                 progress.step("TLS connected. Waiting for TV pairing key…");
                 FilePairing.Result link = client.exchangeFileKeys(key, clientKey);
                 progress.step("Keys exchanged. Confirm the matching number on both screens.");
-                if (!prefs.edit().putString("pending_file_host", host)
-                        .putString("pending_file_token", link.token).commit()) {
-                    throw new IOException("Could not save pending file pairing");
-                }
+                savePendingFileLink(host, link.token);
                 confirmFileNumber(progress, link.code);
                 client.approveFileLink();
                 client.confirm();

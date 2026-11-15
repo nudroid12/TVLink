@@ -636,6 +636,35 @@ public class MainActivity extends Activity {
         refresh.postDelayed(expireLink, 180000);
     }
 
+    private int capturedPairingKey = android.view.KeyEvent.KEYCODE_UNKNOWN;
+
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        int code = event.getKeyCode();
+        if (code == capturedPairingKey) {
+            if (event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                capturedPairingKey = android.view.KeyEvent.KEYCODE_UNKNOWN;
+            }
+            return true;
+        }
+        if (started && pairing != null && receiver != null && hasWindowFocus()
+                && event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            int digit;
+            switch (code) {
+                case android.view.KeyEvent.KEYCODE_DPAD_CENTER: digit = -1; break;
+                case android.view.KeyEvent.KEYCODE_DPAD_UP: digit = 0; break;
+                case android.view.KeyEvent.KEYCODE_DPAD_DOWN: digit = 1; break;
+                case android.view.KeyEvent.KEYCODE_DPAD_LEFT: digit = 2; break;
+                case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: digit = 3; break;
+                default: return super.dispatchKeyEvent(event);
+            }
+            if (receiver.receiveRemotePairingKey(digit)) {
+                capturedPairingKey = code;
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     private void showFileApproval() {
         TransferServer.FileApproval request = receiver.fileApproval();
         if (fileApprovalDialog != null && fileApprovalDialog.request == request) return;

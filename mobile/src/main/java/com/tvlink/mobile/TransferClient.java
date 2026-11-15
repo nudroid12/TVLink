@@ -24,7 +24,7 @@ final class TransferClient implements AutoCloseable {
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
             out.writeUTF(operation);
-            if ("PAIR_FILES".equals(operation)) {
+            if ("PAIR_FILES".equals(operation) || "PAIR_FILES_REMOTE".equals(operation)) {
                 socket.setSoTimeout(65000);
                 out.writeUTF(credential);
             } else {
@@ -58,6 +58,15 @@ final class TransferClient implements AutoCloseable {
         out.writeUTF(clientKey);
         out.flush();
         return result;
+    }
+
+    void verifyRemoteLink(String secret, String linkToken) throws IOException {
+        out.writeUTF(LinkNetwork.sign(secret, "remote-pair-phone", linkToken));
+        out.flush();
+        expect("REMOTE_PROOF");
+        if (!LinkNetwork.matches(LinkNetwork.sign(secret, "remote-pair-tv", linkToken), in.readUTF())) {
+            throw new IOException("Could not verify TVLink on the paired TV");
+        }
     }
 
     void approveFileLink() throws IOException {

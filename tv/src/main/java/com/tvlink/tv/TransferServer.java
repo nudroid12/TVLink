@@ -73,10 +73,16 @@ final class TransferServer implements AutoCloseable {
 
     private boolean pairingEnabled;
     private FileApproval approval;
+    private final LinkKeys remotePairingKeys = new LinkKeys();
+
+    boolean receiveRemotePairingKey(int digit) {
+        return remotePairingKeys.input(digit);
+    }
 
     synchronized void enableLinking(boolean enabled) {
         pairingEnabled = enabled;
         if (!enabled) {
+            remotePairingKeys.enable(false);
             if (approval != null && !Boolean.TRUE.equals(approval.allowed) && active != null) {
                 try { active.close(); } catch (IOException ignored) {}
             }
@@ -102,8 +108,8 @@ final class TransferServer implements AutoCloseable {
         notifyAll();
     }
 
-    private void finishLink(String commitment, String host, DataInputStream in, DataOutputStream out, Socket socket, String binding)
-            throws IOException {
+    private void finishLink(String commitment, String host, DataInputStream in, DataOutputStream out, Socket socket, String binding,
+                            boolean remotePairing) throws IOException {
         synchronized (this) {
             if (!pairingEnabled || !settings.getString("link_token", "").isEmpty()) {
                 throw new IOException("Open Pair or Receive on the TV to connect file transfer");
@@ -114,6 +120,12 @@ final class TransferServer implements AutoCloseable {
         try {
             java.security.KeyPair key = FilePairing.keyPair();
             String serverKey = FilePairing.encode(key.getPublic().getEncoded());
+            if (remotePairing) {
+                synchronized (this) {
+                    if (!pairingEnabled || closed) throw new IOException("File pairing cancelled on TV");
+                    remotePairingKeys.enable(true);
+                }
+            }
             out.writeUTF("PAIR_KEY");
             out.writeUTF(serverKey);
             out.flush();
@@ -124,6 +136,20 @@ final class TransferServer implements AutoCloseable {
             link = FilePairing.derive(key, clientKey, serverKey, false, binding);
         } catch (java.security.GeneralSecurityException | IllegalArgumentException error) {
             throw new IOException("Could not verify file pairing keys", error);
+        }
+
+        if (remotePairing) {
+            String secret = remotePairingKeys.verify(in.readUTF(), link.token);
+            if (secret == null) throw new IOException("Remote pairing input did not match");
+            out.writeUTF("REMOTE_PROOF");
+            out.writeUTF(LinkNetwork.sign(secret, "remote-pair-tv", link.token));
+            out.flush();
+            if (!"ALLOW".equals(in.readUTF())) throw new IOException("File pairing declined on phone");
+            synchronized (this) {
+                saveFileLink(host, link.token);
+            }
+            out.writeUTF("OK");
+            return;
         }
 
         FileApproval request = new FileApproval(link.code);
@@ -145,10 +171,7 @@ final class TransferServer implements AutoCloseable {
                         || android.os.SystemClock.elapsedRealtime() >= end) {
                     throw new IOException("File pairing declined, cancelled or expired on TV");
                 }
-                if (!settings.edit().putString("peer_host", host).putString("link_token", link.token).commit()) {
-                    throw new IOException("Could not save the link on the TV");
-                }
-                enableLinking(false);
+                saveFileLink(host, link.token);
             }
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -159,13 +182,28 @@ final class TransferServer implements AutoCloseable {
         out.writeUTF("OK");
     }
 
+    private synchronized void saveFileLink(String host, String token) throws IOException {
+        if (!pairingEnabled || closed || !settings.getString("link_token", "").isEmpty()) {
+            throw new IOException("File pairing cancelled on TV");
+        }
+        if (!settings.edit().putString("peer_host", host).putString("link_token", token).commit()) {
+            throw new IOException("Could not save the link on the TV");
+        }
+        enableLinking(false);
+    }
+
     private void handle(Socket socket, String binding) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         try {
             String operation = in.readUTF();
-            if ("PAIR_FILES".equals(operation)) {
-                finishLink(in.readUTF(), socket.getInetAddress().getHostAddress(), in, out, socket, binding);
+            boolean remotePairing = "PAIR_FILES_REMOTE".equals(operation);
+            if ("PAIR_FILES".equals(operation) || remotePairing) {
+                try {
+                    finishLink(in.readUTF(), socket.getInetAddress().getHostAddress(), in, out, socket, binding, remotePairing);
+                } finally {
+                    if (remotePairing) remotePairingKeys.enable(false);
+                }
             } else {
                 String token = settings.getString("link_token", "");
                 authorize(operation, token, in, out, binding);

@@ -20,13 +20,4 @@ final class LinkKeys {
         }
     }
 
-    static String proof(String token) {
-        try {
-            byte[] result = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(("TVLink setup v1:" + token).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return android.util.Base64.encodeToString(result, android.util.Base64.NO_WRAP);
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new AssertionError(impossible);
-        }
-    }
 }
