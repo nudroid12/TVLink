@@ -1184,7 +1184,7 @@ public class MainActivity extends Activity {
         android.widget.FrameLayout pad = new android.widget.FrameLayout(this);
         pad.setBackground(remoteBackground(REMOTE_BLUE, 0, 200));
         LinearLayout.LayoutParams padSize = new LinearLayout.LayoutParams(diameter, diameter);
-        padSize.setMargins(0, dp(18), 0, dp(22));
+        padSize.setMargins(0, dp(24), 0, dp(30));
         controls.addView(pad, padSize);
         int target = Math.round(diameter * .30f);
         addDirection(pad, "up", "Up", 19, Gravity.TOP | Gravity.CENTER_HORIZONTAL, target);
@@ -1247,12 +1247,14 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(-1, dp(56));
-        rowSize.bottomMargin = dp(10);
+        rowSize.bottomMargin = home ? dp(16) : 0;
         controls.addView(row, rowSize);
         row.addView(remoteKey(left, leftLabel, leftKey, false, 28),
                 new LinearLayout.LayoutParams(dp(56), dp(56)));
         LinearLayout.LayoutParams centerSize = new LinearLayout.LayoutParams(dp(104), dp(home ? 56 : 44));
-        centerSize.setMargins(dp(18), 0, dp(18), 0);
+        int availableWidth = getResources().getConfiguration().screenWidthDp - 40;
+        int gap = Math.max(0, Math.min(24, (availableWidth - 216) / 2));
+        centerSize.setMargins(dp(gap), 0, dp(gap), 0);
         row.addView(remoteKey(middle, middleLabel, middleKey, home, home ? 28 : 12), centerSize);
         row.addView(remoteKey(right, rightLabel, rightKey, false, 28),
                 new LinearLayout.LayoutParams(dp(56), dp(56)));
