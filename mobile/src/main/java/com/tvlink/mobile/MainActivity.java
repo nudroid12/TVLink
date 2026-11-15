@@ -92,6 +92,10 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen(String title) {
+        if (remoteStatus != null) {
+            suspendRemoteSession();
+            remoteStatus = null;
+        }
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
@@ -376,7 +380,6 @@ public class MainActivity extends Activity {
     }
 
     private void home() {
-        remoteStatus = null;
         showingHome = true;
         LinearLayout page = screen(null);
         addHeader(page);
@@ -565,7 +568,6 @@ public class MainActivity extends Activity {
     }
 
     private void showDevice() {
-        remoteStatus = null;
         LinearLayout body = feature("Device");
         if (!hasRemotePairing()) {
             info(body, "Keep your Android TV on and connected to the same network.");
@@ -874,7 +876,6 @@ public class MainActivity extends Activity {
 
     private LinearLayout filesPage(boolean onTv) {
         showingHome = false;
-        remoteStatus = null;
         LinearLayout page = screen(null);
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
@@ -1179,8 +1180,7 @@ public class MainActivity extends Activity {
 
     private final java.util.concurrent.ThreadPoolExecutor remoteIo =
             new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.SECONDS,
-                    new java.util.concurrent.ArrayBlockingQueue<>(16),
-                    new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
+                    new java.util.concurrent.LinkedBlockingQueue<>());
     private AndroidTvRemote remoteConnection;
     private boolean remotePairing;
 
@@ -1741,14 +1741,23 @@ public class MainActivity extends Activity {
 
     private TextView remoteStatus;
     private boolean remoteConnecting;
+    private volatile int remoteSessionGeneration;
+
+    private void suspendRemoteSession() {
+        remoteSessionGeneration++;
+        remoteConnecting = false;
+        remoteIo.execute(this::closeSystemRemote);
+    }
 
     private void connectRemoteScreen(TextView status) {
-        if (remoteConnecting || remotePairing) return;
+        if (!started || remoteStatus != status || remoteConnecting || remotePairing) return;
+        int generation = remoteSessionGeneration;
         remoteConnecting = true;
         status.setText(linkedTvName() + " · Connecting…");
         PairingLog progress = new PairingLog();
         progress.step("Opening Remote session…");
         remoteIo.execute(() -> {
+            if (generation != remoteSessionGeneration) return;
             Exception failure = null;
             try {
                 ensureRemote(progress::step);
@@ -1758,8 +1767,9 @@ public class MainActivity extends Activity {
             }
             Exception result = failure;
             runOnUiThread(() -> {
+                if (generation != remoteSessionGeneration || isFinishing()
+                        || isDestroyed() || remoteStatus != status) return;
                 remoteConnecting = false;
-                if (isFinishing() || isDestroyed() || remoteStatus != status) return;
                 if (result == null) {
                     status.setText(linkedTvName() + " · Connected");
                 } else {
@@ -1772,17 +1782,21 @@ public class MainActivity extends Activity {
     }
 
     private void sendSystemKey(int key) {
-        if (remotePairing || remoteConnecting || remoteStatus == null) return;
+        if (!started || remotePairing || remoteConnecting || remoteStatus == null
+                || remoteIo.getQueue().size() >= 16) return;
         TextView status = remoteStatus;
+        int generation = remoteSessionGeneration;
         remoteIo.execute(() -> {
+            if (generation != remoteSessionGeneration) return;
             java.util.List<String> messages = new java.util.ArrayList<>();
             try {
                 ensureRemote(messages::add);
-                remoteConnection.key(key);
+                if (generation == remoteSessionGeneration) remoteConnection.key(key);
             } catch (Exception error) {
                 closeSystemRemote();
                 runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed() || remoteStatus != status || remoteConnecting) return;
+                    if (generation != remoteSessionGeneration || isFinishing()
+                            || isDestroyed() || remoteStatus != status || remoteConnecting) return;
                     if ("Remote disconnected".contentEquals(status.getText())) return;
                     status.setText("Remote disconnected");
                     PairingLog log = new PairingLog();
@@ -1835,6 +1849,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onStop() {
         started = false;
+        if (remoteStatus != null) suspendRemoteSession();
         receiverHandler.removeCallbacks(retryReceiver);
         closeReceiver();
         super.onStop();
@@ -1843,6 +1858,7 @@ public class MainActivity extends Activity {
     @Override protected void onStart() {
         super.onStart();
         started = true;
+        if (remoteStatus != null) connectRemoteScreen(remoteStatus);
         startReceiver();
         android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         String token = prefs.getString("link_token", "");
