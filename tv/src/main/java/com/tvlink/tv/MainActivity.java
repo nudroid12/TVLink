@@ -299,18 +299,13 @@ public class MainActivity extends Activity {
         LinearLayout rows = feature("Settings");
         setting(rows, "Check for updates", "Version " + appVersion(), () -> ReleaseCheck.check(this));
         setting(rows, "Device Name", TvSettings.device(this), () -> editSetting("Device Name", "device_name", TvSettings.device(this)));
-        setting(rows, "Save received files to", transferFolderLabel(), this::chooseDirectory);
-        setting(rows, "Direct Downloads access", TvSettings.hasStorageAccess(this) ? "Allowed" : "Optional", this::requestStorageAccess);
+        setting(rows, "Save received files to", TvSettings.directoryLabel(this), this::chooseDirectory);
+        setting(rows, "Direct Downloads access", TvSettings.hasStorageAccess(this) ? "Allowed" : "Optional", this::requestStorageAccessFromSettings);
         toggle(rows, "Receive Transfers", "Accept incoming files", "receive", true);
         toggle(rows, "Launch at startup", "Open TVLink at boot when supported", "startup", false);
         toggle(rows, "Overwrite", "Replace files with the same name", "overwrite", false);
         toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
         rows.getChildAt(0).requestFocus();
-    }
-
-    private String transferFolderLabel() {
-        return TvSettings.hasStorageAccess(this) && getPreferences(MODE_PRIVATE).getBoolean("downloads", false)
-                ? "Downloads / TVLink" : "TVLink app folder";
     }
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
@@ -416,30 +411,41 @@ public class MainActivity extends Activity {
     }
 
     private void chooseDirectory() {
+        File downloads = TvSettings.downloadsDirectory();
         new AlertDialog.Builder(this).setTitle("Save received files to")
                 .setSingleChoiceItems(new String[] {
                         "TVLink app folder\n" + new File(getFilesDir(), "received").getAbsolutePath(),
-                        "Downloads / TVLink\n" + new File(android.os.Environment.getExternalStoragePublicDirectory(
-                                android.os.Environment.DIRECTORY_DOWNLOADS), "TVLink").getAbsolutePath()
-                }, transferFolderLabel().equals("TVLink app folder") ? 0 : 1, (dialog, index) -> {
+                        "Downloads\n" + downloads.getAbsolutePath(),
+                        "Downloads / TVLink\n" + new File(downloads, "TVLink").getAbsolutePath()
+                }, TvSettings.destination(this), (dialog, index) -> {
                     dialog.dismiss();
-                    if (index == 1 && !TvSettings.hasStorageAccess(this)) {
-                        notifyUser("Allow storage access first, then choose Downloads.");
-                        return;
-                    }
                     closeReceiver();
-                    getPreferences(MODE_PRIVATE).edit().putBoolean("downloads", index == 1).apply();
+                    TvSettings.setDestination(this, index);
                     if (isLinked()) startReceiver();
                     showSettings();
+                    if (index != TvSettings.APP_FOLDER && !TvSettings.hasStorageAccess(this)) {
+                        requestStorageAccessFromSettings();
+                    }
                 }).setNegativeButton("Cancel", null).show();
+    }
+
+    private boolean checkingStorageAccess;
+    private boolean returnToStorageSettings;
+
+    private void requestStorageAccessFromSettings() {
+        returnToStorageSettings = true;
+        requestStorageAccess();
     }
 
     private void requestStorageAccess() {
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             try {
+                checkingStorageAccess = true;
                 startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                         android.net.Uri.parse("package:" + getPackageName())));
             } catch (android.content.ActivityNotFoundException error) {
+                checkingStorageAccess = false;
+                returnToStorageSettings = false;
                 notifyUser("This TV does not expose the all-files access screen.");
             }
         } else {
@@ -969,8 +975,9 @@ public class MainActivity extends Activity {
         divider(body);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
+        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
-                && (browsing ? TvSettings.canBrowse(this, file) : file.isFile()));
+                && (browsing ? TvSettings.canBrowse(this, file) : TvSettings.isReceivedFile(settings, file)));
         if (files == null || files.length == 0) {
             info(body, files == null && browsing ? "Cannot read this folder."
                     : browsing ? "This folder is empty." : "No files received yet");
@@ -1109,7 +1116,10 @@ public class MainActivity extends Activity {
                 () -> new AlertDialog.Builder(this).setTitle("Delete file?")
                         .setMessage(filename).setNegativeButton("Cancel", null)
                         .setPositiveButton("Delete", (confirm, which) -> {
-                            if (!file.delete()) notifyUser("Could not delete file");
+                            synchronized (file.getParentFile().getAbsolutePath().intern()) {
+                                if (file.delete()) TvSettings.forgetReceivedFile(getPreferences(MODE_PRIVATE), file);
+                                else notifyUser("Could not delete file");
+                            }
                             renderFiles();
                         }).show());
 
@@ -1156,7 +1166,14 @@ public class MainActivity extends Activity {
                         File target = TransferServer.file(folder, input.getText().toString().trim());
                         if (!target.equals(file)) {
                             synchronized (folder.getAbsolutePath().intern()) {
+                                android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+                                boolean receivedDownload = TvSettings.isDownloadsFile(file)
+                                        && TvSettings.isReceivedFile(settings, file);
                                 if (target.exists() || !file.renameTo(target)) throw new IOException("Cannot rename file");
+                                if (receivedDownload) {
+                                    TvSettings.forgetReceivedFile(settings, file);
+                                    TvSettings.rememberReceivedFile(settings, target);
+                                }
                             }
                         }
                     } catch (IOException error) { notifyUser(error.getMessage()); }
@@ -1256,6 +1273,29 @@ public class MainActivity extends Activity {
             recoverDeviceName();
         }
         if (transferRefresh != null) refresh.post(transferRefresh);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (checkingStorageAccess) {
+            checkingStorageAccess = false;
+            refreshStorageAccess();
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 81) refreshStorageAccess();
+    }
+
+    private void refreshStorageAccess() {
+        if (isLinked()) {
+            closeReceiver();
+            startReceiver();
+        }
+        boolean showSettingsAgain = returnToStorageSettings;
+        returnToStorageSettings = false;
+        if (showSettingsAgain) showSettings();
     }
 
     private void recoverDeviceName() {

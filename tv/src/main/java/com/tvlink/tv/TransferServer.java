@@ -175,7 +175,7 @@ final class TransferServer implements AutoCloseable {
                 }
                 switch (operation) {
                     case "LIST":
-                        File[] files = folder.listFiles(f -> f.isFile() && !f.getName().startsWith("."));
+                        File[] files = folder.listFiles(f -> TvSettings.isReceivedFile(settings, f));
                         if (files == null) throw new IOException("Cannot list files");
                         out.writeUTF("OK");
                         out.writeInt(files.length);
@@ -201,15 +201,25 @@ final class TransferServer implements AutoCloseable {
                         if (!settings.getBoolean("receive", true)) throw new IOException("Receive Transfers is disabled");
                         receive(in, out);
                         break;
-                    case "DELETE":
-                        if (!file(folder, in.readUTF()).delete()) throw new IOException("Cannot delete file");
+                    case "DELETE": {
+                        File source = file(folder, in.readUTF());
+                        synchronized (folder.getAbsolutePath().intern()) {
+                            if (!TvSettings.isReceivedFile(settings, source) || !source.delete()) {
+                                throw new IOException("Cannot delete file");
+                            }
+                            TvSettings.forgetReceivedFile(settings, source);
+                        }
                         out.writeUTF("OK");
                         break;
+                    }
                     case "RENAME":
                         File source = file(folder, in.readUTF());
                         File target = file(folder, in.readUTF());
                         synchronized (folder.getAbsolutePath().intern()) {
-                            if (target.exists() || !source.renameTo(target)) throw new IOException("Cannot rename file");
+                            if (!TvSettings.isReceivedFile(settings, source) || target.exists()
+                                    || !source.renameTo(target)) throw new IOException("Cannot rename file");
+                            TvSettings.forgetReceivedFile(settings, source);
+                            TvSettings.rememberReceivedFile(settings, target);
                         }
                         out.writeUTF("OK");
                         break;
@@ -245,7 +255,7 @@ final class TransferServer implements AutoCloseable {
             throw new IOException("File size unavailable, too large or insufficient storage");
         }
         boolean overwrite = settings.getBoolean("overwrite", false);
-        if (target.exists() && (!overwrite || !target.isFile())) {
+        if (target.exists() && (!overwrite || !TvSettings.isReceivedFile(settings, target))) {
             throw new IOException("A file with this name already exists");
         }
         File temporary = File.createTempFile(".upload-", ".part", folder);
@@ -265,11 +275,12 @@ final class TransferServer implements AutoCloseable {
             }
             synchronized (folder.getAbsolutePath().intern()) {
                 if (closed) throw new IOException("Receiver closed");
-                if (target.exists() && (!overwrite || !target.isFile())) throw new IOException("Cannot save file");
+                if (target.exists() && (!overwrite || !TvSettings.isReceivedFile(settings, target))) throw new IOException("Cannot save file");
                 if (!settings.getBoolean("modify_date", true) && target.isFile()) {
                     temporary.setLastModified(target.lastModified());
                 }
                 if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
+                TvSettings.rememberReceivedFile(settings, target);
             }
             TransferHistory.add(settings, "Received: " + target.getName(), settings.getString("peer_name", ""), total);
             onReceived.accept(target.getName());

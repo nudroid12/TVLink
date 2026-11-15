@@ -56,10 +56,74 @@ final class TvSettings {
         return false;
     }
 
+    static final int APP_FOLDER = 0;
+    static final int DOWNLOADS = 1;
+    static final int DOWNLOADS_TVLINK = 2;
+    private static final String DESTINATION = "receive_destination";
+
+    static File downloadsDirectory() {
+        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
+    static int destination(Context context) {
+        SharedPreferences settings = prefs(context);
+        int previous = settings.contains("downloads")
+                ? (settings.getBoolean("downloads", false) ? DOWNLOADS_TVLINK : APP_FOLDER)
+                : DOWNLOADS;
+        return settings.getInt(DESTINATION, previous);
+    }
+
+    static void setDestination(Context context, int destination) {
+        prefs(context).edit().putInt(DESTINATION, destination).apply();
+    }
+
+    static String directoryLabel(Context context) {
+        if (hasStorageAccess(context)) {
+            if (destination(context) == DOWNLOADS) return "Downloads";
+            if (destination(context) == DOWNLOADS_TVLINK) return "Downloads / TVLink";
+        }
+        return "TVLink app folder";
+    }
+
     static File directory(Context context) {
-        if (prefs(context).getBoolean("downloads", false) && hasStorageAccess(context)) {
-            return new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "TVLink");
+        if (hasStorageAccess(context)) {
+            if (destination(context) == DOWNLOADS) return downloadsDirectory();
+            if (destination(context) == DOWNLOADS_TVLINK) return new File(downloadsDirectory(), "TVLink");
         }
         return new File(context.getFilesDir(), "received");
+    }
+
+    static boolean isDownloadsFile(File file) {
+        return downloadsDirectory().equals(file.getParentFile());
+    }
+
+    static boolean isReceivedFile(SharedPreferences settings, File file) {
+        if (!file.isFile() || file.getName().startsWith(".")) return false;
+        if (!isDownloadsFile(file)) return true;
+        try {
+            File canonical = new File(downloadsDirectory().getCanonicalFile(), file.getName());
+            return canonical.equals(file.getCanonicalFile()) && fingerprint(file).equals(
+                    settings.getString(receivedKey(file), null));
+        } catch (java.io.IOException error) {
+            return false;
+        }
+    }
+
+    static void rememberReceivedFile(SharedPreferences settings, File file) {
+        if (isDownloadsFile(file)) {
+            settings.edit().putString(receivedKey(file), fingerprint(file)).apply();
+        }
+    }
+
+    static void forgetReceivedFile(SharedPreferences settings, File file) {
+        if (isDownloadsFile(file)) settings.edit().remove(receivedKey(file)).apply();
+    }
+
+    private static String receivedKey(File file) {
+        return "received_download:" + file.getName();
+    }
+
+    private static String fingerprint(File file) {
+        return file.lastModified() + ":" + file.length();
     }
 }
