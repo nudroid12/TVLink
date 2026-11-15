@@ -199,6 +199,10 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout feature(String title) {
+        return feature(title, null);
+    }
+
+    private LinearLayout feature(String title, LinearLayout actions) {
         showingHome = false;
         stopPairingDisplay();
         LinearLayout page = screen();
@@ -218,7 +222,14 @@ public class MainActivity extends Activity {
         heading.setTextSize(24);
         heading.setTextColor(Color.WHITE);
         heading.setPadding(showBack ? dp(16) : 0, 0, 0, 0);
-        titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        if (actions == null) {
+            titleRow.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        } else {
+            titleRow.addView(heading, new LinearLayout.LayoutParams(-2, -2));
+            LinearLayout.LayoutParams actionsSize = new LinearLayout.LayoutParams(0, -1, 1);
+            actionsSize.setMarginStart(dp(16));
+            titleRow.addView(actions, actionsSize);
+        }
         ScrollView scroll = new ScrollView(this);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout body = new LinearLayout(this);
@@ -943,12 +954,8 @@ public class MainActivity extends Activity {
 
     private void renderFiles() {
         File folderToRender = storageFolder;
-        LinearLayout body = feature("My Files");
-        storageFolder = folderToRender;
-        boolean browsing = storageFolder != null;
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        body.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
         addFilesToolbarButton(toolbar, "Received", this::showFiles);
         Button browse = addFilesToolbarButton(toolbar, "Browse storage", this::browseStorage);
         toolbar.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
@@ -956,6 +963,9 @@ public class MainActivity extends Activity {
             newestFirst = !newestFirst;
             renderFiles();
         });
+        LinearLayout body = feature("My Files", toolbar);
+        storageFolder = folderToRender;
+        boolean browsing = storageFolder != null;
         divider(body);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
