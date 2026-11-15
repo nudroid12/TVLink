@@ -17,7 +17,11 @@ final class TransferServer implements AutoCloseable {
     private volatile boolean closed;
     private final android.content.SharedPreferences settings;
 
-    TransferServer(File folder, File identityDirectory, android.content.SharedPreferences settings) throws IOException {
+    private final java.util.function.Consumer<String> onReceived;
+
+    TransferServer(File folder, File identityDirectory, android.content.SharedPreferences settings,
+                   java.util.function.Consumer<String> onReceived) throws IOException {
+        this.onReceived = onReceived;
         this.folder = folder;
         this.identityDirectory = identityDirectory;
         this.settings = settings;
@@ -268,6 +272,7 @@ final class TransferServer implements AutoCloseable {
                 if (!temporary.renameTo(target)) throw new IOException("Cannot save file");
             }
             TransferHistory.add(settings, "Received: " + target.getName(), settings.getString("peer_name", ""), total);
+            onReceived.accept(target.getName());
             out.writeUTF("OK");
         } catch (IOException error) {
             TransferHistory.add(settings, "Receive failed: " + target.getName() + " · " + error.getMessage());

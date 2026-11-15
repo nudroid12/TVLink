@@ -262,11 +262,29 @@ public class MainActivity extends Activity {
         rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
+    private void showTextEditor(AlertDialog dialog, EditText input) {
+        android.view.Window window = dialog.getWindow();
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        dialog.show();
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+        input.requestFocus();
+        Runnable keyboard = () -> {
+            if (!dialog.isShowing() || !input.hasFocus()) return;
+            android.view.inputmethod.InputMethodManager ime =
+                    getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (ime != null) ime.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        };
+        input.setOnClickListener(view -> input.post(keyboard));
+        input.post(keyboard);
+    }
+
     private void editSetting(String title, String key, String initial) {
         EditText value = new EditText(this);
         value.setSingleLine(true);
         value.setText(initial);
-        new AlertDialog.Builder(this).setTitle(title).setView(value).setNegativeButton("Cancel", null)
+        AlertDialog editor = new AlertDialog.Builder(this).setTitle(title).setView(value).setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", (dialog, which) -> {
                     String input = value.getText().toString().trim();
                     if (input.isEmpty() || input.length() > 40) {
@@ -275,7 +293,8 @@ public class MainActivity extends Activity {
                     }
                     getPreferences(MODE_PRIVATE).edit().putString(key, input).apply();
                     showSettings();
-                }).show();
+                }).create();
+        showTextEditor(editor, value);
     }
 
     private void chooseDirectory() {
@@ -351,8 +370,8 @@ public class MainActivity extends Activity {
                 receiver = new TransferServer(received(), getNoBackupFilesDir(), getPreferences(MODE_PRIVATE),
                         transferHistory, filename -> runOnUiThread(() -> {
                             if (isFinishing() || isDestroyed()) return;
-                            notifyUser("File received: " + filename);
                             if (started && !showingTransfers) showTransfers();
+                            showReceivedNotice(filename);
                         }));
                 receiverError = null;
             } catch (IOException | SecurityException error) {
@@ -574,6 +593,40 @@ public class MainActivity extends Activity {
                 if (!succeeded || success == null) runOnUiThread(() -> busy = false);
             }
         });
+    }
+
+    private void confirmClearHistory() {
+        new AlertDialog.Builder(this).setTitle("Clear transfer history?")
+                .setMessage("Your files will be kept.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear", (dialog, which) -> transferHistory.clear()).show();
+    }
+
+    private TextView receivedNotice;
+
+    private void showReceivedNotice(String filename) {
+        if (!started || isFinishing() || isDestroyed()) return;
+        android.widget.FrameLayout content = findViewById(android.R.id.content);
+        if (receivedNotice != null) content.removeView(receivedNotice);
+        TextView banner = new TextView(this);
+        banner.setText("File received\n" + filename);
+        banner.setTextColor(Color.WHITE);
+        banner.setTextSize(16);
+        banner.setMaxLines(3);
+        banner.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        banner.setPadding(dp(16), dp(10), dp(16), dp(10));
+        banner.setBackground(tile(0xff1b2740, false));
+        banner.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        android.widget.FrameLayout.LayoutParams size = new android.widget.FrameLayout.LayoutParams(
+                -2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        size.setMargins(dp(24), 0, dp(24), dp(24));
+        content.addView(banner, size);
+        receivedNotice = banner;
+        banner.postDelayed(() -> {
+            if (receivedNotice != banner) return;
+            content.removeView(banner);
+            receivedNotice = null;
+        }, 4500);
     }
 
     private void notifyUser(String message) {
@@ -837,7 +890,13 @@ public class MainActivity extends Activity {
         progress.setVisibility(android.view.View.GONE);
         receive.addView(progress, new LinearLayout.LayoutParams(-1, dp(12)));
         divider(body);
-        addTransferHeading(body, "Transfer history");
+        LinearLayout historyHeading = new LinearLayout(this);
+        historyHeading.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(historyHeading, new LinearLayout.LayoutParams(-1, -2));
+        TextView heading = addTransferHeading(historyHeading, "Transfer history");
+        heading.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+        historyHeading.addView(button("Clear history", this::confirmClearHistory),
+                new LinearLayout.LayoutParams(-2, dp(48)));
         LinearLayout history = new LinearLayout(this);
         history.setOrientation(LinearLayout.VERTICAL);
         body.addView(history);
@@ -1127,7 +1186,7 @@ public class MainActivity extends Activity {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setText(file.getName());
-        new AlertDialog.Builder(this).setTitle("Rename").setView(input)
+        AlertDialog editor = new AlertDialog.Builder(this).setTitle("Rename").setView(input)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", (d, choice) -> {
                     try {
@@ -1139,7 +1198,8 @@ public class MainActivity extends Activity {
                         }
                     } catch (IOException error) { notifyUser(error.getMessage()); }
                     showLocalFiles();
-                }).show();
+                }).create();
+        showTextEditor(editor, input);
     }
 
     private void openFile(File file, boolean apk) {
@@ -1225,10 +1285,11 @@ public class MainActivity extends Activity {
                         EditText input = new EditText(this);
                         input.setSingleLine(true);
                         input.setText(name);
-                        new AlertDialog.Builder(this).setTitle("Rename").setView(input)
+                        AlertDialog editor = new AlertDialog.Builder(this).setTitle("Rename").setView(input)
                                 .setNegativeButton("Cancel", null)
                                 .setPositiveButton("Save", (d, w) ->
-                                        changeFile("RENAME", name, input.getText().toString().trim())).show();
+                                        changeFile("RENAME", name, input.getText().toString().trim())).create();
+                        showTextEditor(editor, input);
                     } else {
                         new AlertDialog.Builder(this).setTitle("Delete file?").setMessage(name)
                                 .setNegativeButton("Cancel", null)
@@ -1554,10 +1615,7 @@ public class MainActivity extends Activity {
             if (!isDestroyed()) remoteIo.execute(() -> reportPairingStatus(host, "CANCELLED"));
         });
         code.setOnFocusChangeListener((view, focused) -> updatePairingBoxes(code, digits));
-        dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        code.requestFocus();
-        dialog.show();
+        showTextEditor(dialog, code);
         timer.postDelayed(expire, 90000);
         updatePairingBoxes(code, digits);
         Button pairButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
@@ -1940,6 +1998,10 @@ public class MainActivity extends Activity {
         if (remoteStatus != null) suspendRemoteSession();
         receiverHandler.removeCallbacks(retryReceiver);
         closeReceiver();
+        if (receivedNotice != null) {
+            ((android.widget.FrameLayout) findViewById(android.R.id.content)).removeView(receivedNotice);
+            receivedNotice = null;
+        }
         super.onStop();
     }
 

@@ -17,6 +17,10 @@ import org.json.JSONObject;
 final class TransferHistory {
     private static final String KEY = "transfer_history";
 
+    static synchronized void clear(SharedPreferences prefs) {
+        prefs.edit().remove(KEY).apply();
+    }
+
     static JSONArray read(SharedPreferences prefs) {
         try {
             return new JSONArray(prefs.getString(KEY, "[]"));
