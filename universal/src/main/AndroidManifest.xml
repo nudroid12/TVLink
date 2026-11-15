@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
 
-    <application android:label="TVLink Universal" android:icon="@mipmap/tvlink_launcher"
+    <application android:label="TVLink" android:icon="@mipmap/tvlink_launcher"
         android:banner="@drawable/tv_banner" android:theme="@android:style/Theme.Material.NoActionBar"
         android:allowBackup="false" android:requestLegacyExternalStorage="true">
         <activity android:name="com.tvlink.universal.LauncherActivity" android:exported="true">

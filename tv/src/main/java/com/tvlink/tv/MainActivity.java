@@ -414,7 +414,10 @@ public class MainActivity extends Activity {
         int destination = TvSettings.destination(this);
         int checked = destination == TvSettings.DOWNLOADS_TVLINK ? -1 : destination;
         new AlertDialog.Builder(this).setTitle("Save received files to")
-                .setSingleChoiceItems(new String[] {"TVLink app folder", "Downloads"}, checked, (dialog, index) -> {
+                .setSingleChoiceItems(new String[] {
+                        "TVLink app folder\n" + new File(getFilesDir(), "received").getAbsolutePath(),
+                        "Downloads\n" + TvSettings.downloadsDirectory().getAbsolutePath()
+                }, checked, (dialog, index) -> {
                     dialog.dismiss();
                     closeReceiver();
                     TvSettings.setDestination(this, index);
