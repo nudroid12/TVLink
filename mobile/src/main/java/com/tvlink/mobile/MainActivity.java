@@ -618,6 +618,13 @@ public class MainActivity extends Activity {
         status.setGravity(Gravity.CENTER);
         Button unpair = button("Unpair", this::confirmUnpair);
         unpair.setTextColor(0xffff9baa);
+        StateListDrawable unpairBackground = new StateListDrawable();
+        unpairBackground.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        unpairBackground.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        GradientDrawable unpairOutline = tile(0xff1b2740, false);
+        unpairOutline.setStroke(dp(1), FOCUS_BLUE);
+        unpairBackground.addState(new int[] {}, unpairOutline);
+        unpair.setBackground(unpairBackground);
         card.addView(unpair, new LinearLayout.LayoutParams(-1, -2));
 
         Button change = button(linkedFiles ? "Change TV" : "Connect file transfer",
