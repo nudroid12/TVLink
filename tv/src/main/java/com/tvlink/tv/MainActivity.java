@@ -606,9 +606,8 @@ public class MainActivity extends Activity {
         refresh.removeCallbacks(updatePairing);
         dismissFileApproval();
         if (receiver == null || pairing == null) return;
-        boolean remotePaired = receiver.pairingStatus().startsWith("Phone reports Remote pairing saved");
         receiver.enableLinking(false);
-        if (!remotePaired) pairing.setText("Pairing timed out. Press Back and reopen Pair to try again.");
+        pairing.setText("Pairing timed out. Press Back and reopen Pair to try again.");
     };
 
     private void showReceive() {
