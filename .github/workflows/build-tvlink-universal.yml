@@ -16,7 +16,11 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: tvlink-universal-build-and-publish
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -89,3 +93,35 @@ jobs:
           name: TVLink-Universal
           path: dist/TVLink-Universal.apk
           if-no-files-found: error
+      - name: Publish Universal update
+        if: github.event_name == 'workflow_run' || github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=tvlink-universal
+          apk=dist/TVLink-Universal.apk
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$(git rev-parse HEAD)" --title 'TVLink Universal' --prerelease
+          fi
+          assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          if grep -Fxq -- universal-update.json <<< "$assets"; then
+            gh release download "$tag" --pattern universal-update.json --output dist/current.json
+            current="$(jq -er '.versionCode | select(type == "number")' dist/current.json)"
+            if (( current >= GITHUB_RUN_NUMBER )); then exit 0; fi
+          fi
+          asset="TVLink-UNIVERSAL-$GITHUB_RUN_NUMBER.apk"
+          if grep -Fxq -- "$asset" <<< "$assets"; then
+            gh release download "$tag" --pattern "$asset" --output dist/published.apk
+            cmp "$apk" dist/published.apk
+          else
+            cp "$apk" "dist/$asset"
+            gh release upload "$tag" "dist/$asset"
+          fi
+          version="$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' universal/build.gradle.kts)"
+          [[ -n "$version" ]]
+          jq -n --argjson code "$GITHUB_RUN_NUMBER" --arg version "$version" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$asset" \
+            '{versionCode: $code, versionName: $version, downloadUrl: $url}' > dist/universal-update.json
+          gh release upload "$tag" dist/universal-update.json --clobber
