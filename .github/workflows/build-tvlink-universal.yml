@@ -1,0 +1,91 @@
+name: TVLink Universal Build
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - 'tv/**'
+      - 'universal/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle.properties'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Apply ZIP Patch]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && 'main' || github.sha }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+      - name: Build and sign Universal APK
+        shell: bash
+        env:
+          TVLINK_KEYSTORE_BASE64: ${{ secrets.TVLINK_KEYSTORE_BASE64 }}
+          TVLINK_KEYSTORE_PASSWORD: ${{ secrets.TVLINK_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TVLINK_KEYSTORE_BASE64" || -z "$TVLINK_KEYSTORE_PASSWORD" ]]; then
+            echo "::error::Set TVLINK_KEYSTORE_BASE64 and TVLINK_KEYSTORE_PASSWORD in GitHub Actions secrets."
+            exit 1
+          fi
+          umask 077
+          signing_dir="$(mktemp -d "${RUNNER_TEMP:?}/tvlink-signing.XXXXXX")"
+          trap 'rm -rf -- "$signing_dir"' EXIT
+          keystore="$signing_dir/tvlink.p12"
+          printf '%s' "$TVLINK_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          unset TVLINK_KEYSTORE_BASE64
+          keytool -list -storetype PKCS12 -keystore "$keystore" -alias tvlink \
+            -storepass:env TVLINK_KEYSTORE_PASSWORD >/dev/null
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
+          missing=()
+          if [[ ! -s "$sdk/platforms/android-35/android.jar" ]]; then
+            missing+=('platforms;android-35')
+          fi
+          if [[ ! -x "$sdk/build-tools/34.0.0/apksigner" ]]; then
+            missing+=('build-tools;34.0.0')
+          fi
+          if (( ${#missing[@]} )); then
+            sdkmanager_bin="$(command -v sdkmanager || true)"
+            if [[ -z "$sdkmanager_bin" ]]; then
+              for candidate in "$sdk/cmdline-tools/latest/bin/sdkmanager" "$sdk"/cmdline-tools/*/bin/sdkmanager; do
+                if [[ -x "$candidate" ]]; then
+                  sdkmanager_bin="$candidate"
+                  break
+                fi
+              done
+            fi
+            if [[ -z "$sdkmanager_bin" ]]; then
+              echo "::error::Android SDK packages missing (${missing[*]}) and sdkmanager was not found under $sdk/cmdline-tools."
+              exit 1
+            fi
+            "$sdkmanager_bin" --sdk_root="$sdk" --install "${missing[@]}"
+          fi
+          env -u TVLINK_KEYSTORE_PASSWORD gradle :universal:assembleDebug -PuniversalVersionCode="$GITHUB_RUN_NUMBER" --stacktrace
+          mkdir -p dist
+          apksigner="$sdk/build-tools/34.0.0/apksigner"
+          "$apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias tvlink \
+            --ks-pass env:TVLINK_KEYSTORE_PASSWORD --key-pass env:TVLINK_KEYSTORE_PASSWORD \
+            --out dist/TVLink-Universal.apk universal/build/outputs/apk/debug/universal-debug.apk
+          "$apksigner" verify --print-certs dist/TVLink-Universal.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TVLink-Universal
+          path: dist/TVLink-Universal.apk
+          if-no-files-found: error
