@@ -508,6 +508,12 @@ public class MainActivity extends Activity {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xffff7186);
         });
         unpair.setTextColor(focusText(0xffff9baa));
+        StateListDrawable unpairBackground = new StateListDrawable();
+        unpairBackground.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
+        GradientDrawable unpairOutline = tile(0xff1b2740, false);
+        unpairOutline.setStroke(dp(1), FOCUS_BLUE);
+        unpairBackground.addState(new int[] {}, unpairOutline);
+        unpair.setBackground(unpairBackground);
         card.addView(unpair, new LinearLayout.LayoutParams(-1, dp(44)));
     }
 
