@@ -411,13 +411,10 @@ public class MainActivity extends Activity {
     }
 
     private void chooseDirectory() {
-        File downloads = TvSettings.downloadsDirectory();
+        int destination = TvSettings.destination(this);
+        int checked = destination == TvSettings.DOWNLOADS_TVLINK ? -1 : destination;
         new AlertDialog.Builder(this).setTitle("Save received files to")
-                .setSingleChoiceItems(new String[] {
-                        "TVLink app folder\n" + new File(getFilesDir(), "received").getAbsolutePath(),
-                        "Downloads\n" + downloads.getAbsolutePath(),
-                        "Downloads / TVLink\n" + new File(downloads, "TVLink").getAbsolutePath()
-                }, TvSettings.destination(this), (dialog, index) -> {
+                .setSingleChoiceItems(new String[] {"TVLink app folder", "Downloads"}, checked, (dialog, index) -> {
                     dialog.dismiss();
                     closeReceiver();
                     TvSettings.setDestination(this, index);
@@ -958,6 +955,8 @@ public class MainActivity extends Activity {
         renderFiles();
     }
 
+    private LinearLayout filesToolbar;
+
     private void renderFiles() {
         File folderToRender = storageFolder;
         LinearLayout toolbar = new LinearLayout(this);
@@ -970,17 +969,16 @@ public class MainActivity extends Activity {
             renderFiles();
         });
         LinearLayout body = feature("My Files", toolbar);
+        filesToolbar = toolbar;
         storageFolder = folderToRender;
         boolean browsing = storageFolder != null;
         divider(body);
         if (browsing) info(body, storageFolder.getAbsolutePath());
         File folder = browsing ? storageFolder : received();
-        android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
-                && (browsing ? TvSettings.canBrowse(this, file) : TvSettings.isReceivedFile(settings, file)));
+                && (browsing ? TvSettings.canBrowse(this, file) : isVisibleReceivedFile(folder, file)));
         if (files == null || files.length == 0) {
-            info(body, files == null && browsing ? "Cannot read this folder."
-                    : browsing ? "This folder is empty." : "No files received yet");
+            info(body, files == null && folder.exists() ? "Cannot read this folder." : "This folder is empty.");
             browse.requestFocus();
             return;
         }
@@ -993,6 +991,15 @@ public class MainActivity extends Activity {
         int firstFile = body.getChildCount();
         for (File file : files) addFileRow(body, file);
         body.getChildAt(firstFile).requestFocus();
+    }
+
+    private boolean isVisibleReceivedFile(File folder, File file) {
+        try {
+            return file.isFile() && file.canRead()
+                    && file.getCanonicalFile().equals(new File(folder.getCanonicalFile(), file.getName()));
+        } catch (IOException error) {
+            return false;
+        }
     }
 
     private Button addFilesToolbarButton(LinearLayout toolbar, String title, Runnable action) {
@@ -1112,6 +1119,7 @@ public class MainActivity extends Activity {
                 Color.WHITE, () -> openFile(file, apk));
         addFileAction(panel, dialog, "Rename", R.drawable.ic_file_rename, Color.WHITE, () -> renameFile(file));
         addFileAction(panel, dialog, "Send to phone", R.drawable.ic_phone, Color.WHITE, () -> sendFile(file));
+        addFileAction(panel, dialog, "Move to", R.drawable.tv_ic_files, Color.WHITE, () -> chooseMoveStorage(file));
         addFileAction(panel, dialog, "Delete", R.drawable.ic_file_delete, 0xffff8585,
                 () -> new AlertDialog.Builder(this).setTitle("Delete file?")
                         .setMessage(filename).setNegativeButton("Cancel", null)
@@ -1131,7 +1139,7 @@ public class MainActivity extends Activity {
             window.setDimAmount(.55f);
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             window.setLayout(Math.min(dp(560), metrics.widthPixels - dp(48)),
-                    Math.min(dp(334), metrics.heightPixels - dp(40)));
+                    Math.min(dp(382), metrics.heightPixels - dp(40)));
         }
         open.requestFocus();
     }
@@ -1152,6 +1160,101 @@ public class MainActivity extends Activity {
         row.setCompoundDrawablePadding(dp(14));
         panel.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
         return row;
+    }
+
+    private void chooseMoveStorage(File file) {
+        java.util.List<File> roots = new java.util.ArrayList<>();
+        if (TvSettings.hasStorageAccess(this)) roots.addAll(TvSettings.storageRoots(this));
+        String[] labels = new String[roots.size() + 1];
+        for (int i = 0; i < roots.size(); i++) {
+            labels[i] = i == 0 ? "Internal storage" : "External storage · " + roots.get(i).getName();
+        }
+        int appFolderIndex = roots.size();
+        labels[appFolderIndex] = "TVLink app folder";
+        File appFolder = new File(getFilesDir(), "received");
+        new AlertDialog.Builder(this).setTitle("Move to").setItems(labels, (dialog, index) -> {
+            File root = index == appFolderIndex ? appFolder : roots.get(index);
+            chooseMoveFolder(file, root, root, index == appFolderIndex);
+        }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void chooseMoveFolder(File file, File root, File folder, boolean appFolder) {
+        File[] children = appFolder ? new File[0] : folder.listFiles(entry ->
+                entry.isDirectory() && !entry.getName().startsWith(".") && TvSettings.canBrowse(this, entry));
+        if (children == null) children = new File[0];
+        java.util.Arrays.sort(children, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+        File[] folders = children;
+        boolean atRoot = folder.equals(root);
+        int firstFolder = atRoot ? 0 : 1;
+        String[] labels = new String[folders.length + firstFolder];
+        if (!atRoot) labels[0] = "↑ Parent folder";
+        for (int i = 0; i < folders.length; i++) labels[i + firstFolder] = folders[i].getName();
+        AlertDialog.Builder picker = new AlertDialog.Builder(this)
+                .setTitle(appFolder ? "TVLink app folder" : folder.getName())
+                .setNegativeButton("Back", (dialog, which) -> {
+                    if (atRoot) chooseMoveStorage(file);
+                    else chooseMoveFolder(file, root, folder.getParentFile(), false);
+                });
+        if (labels.length > 0) picker.setItems(labels, (dialog, index) -> {
+            File next = index < firstFolder ? folder.getParentFile() : folders[index - firstFolder];
+            chooseMoveFolder(file, root, next, false);
+        });
+        AlertDialog dialog = picker.setPositiveButton("Move here", (closed, which) ->
+                moveFile(file, root, folder, appFolder)).create();
+        dialog.setOnCancelListener(closed -> {
+            if (atRoot) chooseMoveStorage(file);
+            else chooseMoveFolder(file, root, folder.getParentFile(), false);
+        });
+        dialog.show();
+        if (folder.equals(file.getParentFile()) || (!appFolder && !folder.canWrite())) {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+        }
+    }
+
+    private void moveFile(File source, File root, File folder, boolean appFolder) {
+        LinearLayout view = filesToolbar;
+        File receiveDirectory = received();
+        sender.execute(() -> {
+            String message;
+            try {
+                if (appFolder) {
+                    if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) {
+                        throw new IOException("Cannot create TVLink app folder");
+                    }
+                } else if (!TvSettings.hasStorageAccess(this)
+                        || !(folder.equals(root) ? TvSettings.storageRoots(this).contains(root)
+                                : TvSettings.canBrowse(this, folder))) {
+                    throw new IOException("Storage access is unavailable");
+                }
+                File target = TransferServer.file(folder, source.getName());
+                if (source.getCanonicalFile().equals(target.getCanonicalFile())) {
+                    throw new IOException("File is already in this folder");
+                }
+                android.content.SharedPreferences settings = getPreferences(MODE_PRIVATE);
+                String sourceLock = source.getParentFile().getAbsolutePath().intern();
+                String targetLock = folder.getAbsolutePath().intern();
+                boolean sourceFirst = sourceLock.compareTo(targetLock) <= 0;
+                synchronized (sourceFirst ? sourceLock : targetLock) {
+                    synchronized (sourceFirst ? targetLock : sourceLock) {
+                        boolean receivedFile = (TvSettings.isDownloadsFile(source)
+                                || source.getParentFile().getCanonicalFile().equals(receiveDirectory.getCanonicalFile()))
+                                && TvSettings.isReceivedFile(settings, source);
+                        FileMove.move(source, target);
+                        TvSettings.forgetReceivedFile(settings, source);
+                        if (receivedFile) TvSettings.rememberReceivedFile(settings, target);
+                    }
+                }
+                message = "Moved to " + (appFolder ? "TVLink app folder" : folder.getName());
+            } catch (IOException | SecurityException error) {
+                message = error.getMessage() == null ? "Could not move file" : error.getMessage();
+            }
+            String result = message;
+            runOnUiThread(() -> {
+                if (isDestroyed() || isFinishing()) return;
+                if (view.isAttachedToWindow()) renderFiles();
+                notifyUser(result);
+            });
+        });
     }
 
     private void renameFile(File file) {
