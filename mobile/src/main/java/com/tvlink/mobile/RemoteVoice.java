@@ -14,6 +14,8 @@ final class RemoteVoice {
     private static final int SAMPLE_RATE = 8000;
     private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
+    private static final long RECOGNITION_TAIL_MS = 6000;
+    private static final long RESPONSE_GRACE_MS = 12000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
                         IntConsumer level) throws IOException {
@@ -93,10 +95,11 @@ final class RemoteVoice {
 
     private static void waitForTv(AndroidTvRemote remote, int session, AtomicBoolean stopped,
                                   AtomicBoolean finish) throws IOException {
-        // Let the TV finish recognition after the phone mic is released.
+        // Stop recording on release and let the TV end the session after its response.
+        // Bound the wait for TVs that leave the remote session open.
         byte[] silence = new byte[CHUNK_BYTES];
         long start = SystemClock.elapsedRealtime();
-        long deadline = start + 6000;
+        long deadline = start + RESPONSE_GRACE_MS;
         long nextSilence = start;
         boolean acknowledged = false;
         while (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
@@ -104,10 +107,9 @@ final class RemoteVoice {
             if (!acknowledged && remote.voiceAcknowledged(session)) {
                 acknowledged = true;
                 android.util.Log.d(LOG_TAG, "Session " + session + ": audio acknowledged");
-                deadline = now + 3000;
             }
             if (now >= deadline) break;
-            if (!acknowledged && now >= nextSilence) {
+            if (!acknowledged && now >= nextSilence && now - start < RECOGNITION_TAIL_MS) {
                 remote.sendVoice(session, silence);
                 nextSilence = now + CHUNK_BYTES * 1000L / (SAMPLE_RATE * 2);
             }
@@ -118,8 +120,8 @@ final class RemoteVoice {
                 throw new IOException("Voice processing interrupted.", error);
             }
         }
-        if (remote.voiceActive(session) && !acknowledged && (!stopped.get() || finish.get())) {
-            android.util.Log.d(LOG_TAG, "Session " + session + ": no acknowledgement before timeout");
+        if (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
+            android.util.Log.d(LOG_TAG, "Session " + session + ": response window ended; acknowledged=" + acknowledged);
         }
     }
 

@@ -204,14 +204,10 @@ public class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
-        Button back = button("←", this::showSettings);
-        back.setContentDescription("Back to Settings");
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
         TextView heading = new TextView(this);
         heading.setText("About");
         heading.setTextSize(23);
         heading.setTextColor(Color.WHITE);
-        heading.setPadding(dp(12), 0, 0, 0);
         header.addView(heading);
         divider(page);
         ScrollView scroll = new ScrollView(this);
@@ -492,7 +488,7 @@ public class MainActivity extends Activity {
             StateListDrawable background = new StateListDrawable();
             background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
             background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
-            background.addState(new int[] {}, tile(0xff82aaff, false));
+            background.addState(new int[] {}, tile(SEND_FILE_BLUE, false));
             send.setBackground(background);
             send.setTextColor(0xff121725);
         }
@@ -594,7 +590,7 @@ public class MainActivity extends Activity {
         StateListDrawable background = new StateListDrawable();
         background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
         background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
-        background.addState(new int[] {}, tile(LINK_BLUE, false));
+        background.addState(new int[] {}, tile(SEND_FILE_BLUE, false));
         card.setBackground(background);
 
         ImageView icon = new ImageView(this);
@@ -1153,7 +1149,7 @@ public class MainActivity extends Activity {
         body.setGravity(Gravity.CENTER);
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_files);
-        icon.setColorFilter(LINK_BLUE);
+        icon.setColorFilter(SEND_FILE_BLUE);
         body.addView(icon, new LinearLayout.LayoutParams(dp(68), dp(68)));
         TextView text = info(body, message);
         text.setGravity(Gravity.CENTER);
@@ -1398,7 +1394,7 @@ public class MainActivity extends Activity {
     private boolean remotePairing;
 
     private static final int REMOTE_NAVY = 0xff0b1329;
-    static final int LINK_BLUE = FOCUS_BLUE;
+    static final int SEND_FILE_BLUE = 0xff82aaff;
 
     private void showRemote() {
         showingHome = false;
@@ -1413,13 +1409,13 @@ public class MainActivity extends Activity {
         title.setText("Remote");
         title.setTextSize(26);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setTextColor(LINK_BLUE);
+        title.setTextColor(SEND_FILE_BLUE);
         title.setGravity(Gravity.CENTER);
         header.addView(title, new LinearLayout.LayoutParams(-1, -1));
 
         TextView status = info(page, "Connecting…");
         status.setGravity(Gravity.CENTER);
-        status.setTextColor(LINK_BLUE);
+        status.setTextColor(SEND_FILE_BLUE);
         status.setMaxLines(2);
         remoteStatus = status;
         status.setOnClickListener(view -> showDevice());
@@ -1446,7 +1442,7 @@ public class MainActivity extends Activity {
         int height = getResources().getDisplayMetrics().heightPixels;
         int diameter = Math.max(dp(170), Math.min(dp(300), Math.min(width - dp(64), height / 3)));
         android.widget.FrameLayout pad = new android.widget.FrameLayout(this);
-        pad.setBackground(remoteBackground(LINK_BLUE, 0, 200));
+        pad.setBackground(remoteBackground(SEND_FILE_BLUE, 0, 200));
         LinearLayout.LayoutParams padSize = new LinearLayout.LayoutParams(diameter, diameter);
         padSize.setMargins(0, dp(24), 0, dp(30));
         controls.addView(pad, padSize);
@@ -1457,7 +1453,7 @@ public class MainActivity extends Activity {
         addDirection(pad, "right", "Right", 22, Gravity.RIGHT | Gravity.CENTER_VERTICAL, target);
         Button ok = button("OK", () -> sendSystemKey(23));
         ok.setPadding(0, 0, 0, 0);
-        ok.setTextColor(LINK_BLUE);
+        ok.setTextColor(SEND_FILE_BLUE);
         ok.setTextSize(22);
         ok.setBackground(remoteBackground(REMOTE_NAVY, 0, 120));
         int center = Math.round(diameter * .42f);
@@ -1472,7 +1468,7 @@ public class MainActivity extends Activity {
     private StateListDrawable remoteBackground(int fill, int border, int radius) {
         StateListDrawable background = new StateListDrawable();
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(fill == LINK_BLUE ? 0xff9ac2ff : 0xff31446d);
+        pressed.setColor(fill == SEND_FILE_BLUE ? 0xff9ac2ff : 0xff31446d);
         pressed.setStroke(dp(2), FOCUS_BLUE);
         pressed.setCornerRadius(dp(radius));
         GradientDrawable normal = new GradientDrawable();
@@ -1488,8 +1484,8 @@ public class MainActivity extends Activity {
     private RemoteIconView remoteIcon(String icon, String label, Runnable action, boolean light,
                                       int radius, boolean onPad) {
         RemoteIconView button = new RemoteIconView(this, icon, label,
-                light || onPad ? REMOTE_NAVY : LINK_BLUE);
-        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? LINK_BLUE : REMOTE_NAVY,
+                light || onPad ? REMOTE_NAVY : SEND_FILE_BLUE);
+        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? SEND_FILE_BLUE : REMOTE_NAVY,
                 light || onPad ? 0 : CONTENT_DIVIDER, radius));
         button.setOnClickListener(view -> action.run());
         return button;
@@ -2058,7 +2054,7 @@ public class MainActivity extends Activity {
 
         TextView device = new TextView(dialog.getContext());
         device.setText(linkedTvName());
-        device.setTextColor(LINK_BLUE);
+        device.setTextColor(SEND_FILE_BLUE);
         device.setTextSize(22);
         device.setGravity(Gravity.CENTER);
         page.addView(device, new LinearLayout.LayoutParams(-1, dp(48)));
