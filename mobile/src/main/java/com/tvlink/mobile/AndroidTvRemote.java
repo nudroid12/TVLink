@@ -354,7 +354,10 @@ final class AndroidTvRemote implements AutoCloseable {
             }
             if (message.containsKey(VOICE_END) && voiceSession >= 0) {
                 Object id = nested(message, VOICE_END).get(1);
-                if (Integer.valueOf(voiceSession).equals(id)) voiceSession = -1;
+                if (Integer.valueOf(voiceSession).equals(id)) {
+                    android.util.Log.d(RemoteVoice.LOG_TAG, "Session " + voiceSession + ": VOICE_END from TV");
+                    voiceSession = -1;
+                }
             }
         }
     }
@@ -363,8 +366,10 @@ final class AndroidTvRemote implements AutoCloseable {
 
     boolean voiceActive(int session) { return !closed && voiceSession == session; }
 
-    void sendVoice(int session, byte[] samples) throws IOException {
-        if (voiceActive(session)) write(field(VOICE_PAYLOAD, concat(number(1, session), field(2, samples))));
+    boolean sendVoice(int session, byte[] samples) throws IOException {
+        if (!voiceActive(session)) return false;
+        write(field(VOICE_PAYLOAD, concat(number(1, session), field(2, samples))));
+        return true;
     }
 
     void endVoice(int session) throws IOException {
@@ -373,6 +378,7 @@ final class AndroidTvRemote implements AutoCloseable {
             voiceSession = -1;
         }
         write(field(VOICE_END, number(1, session)));
+        android.util.Log.d(RemoteVoice.LOG_TAG, "Session " + session + ": VOICE_END sent to TV");
     }
 
     boolean isOpen() { return !closed; }

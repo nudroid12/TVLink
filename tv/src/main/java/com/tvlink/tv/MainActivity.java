@@ -333,11 +333,15 @@ public class MainActivity extends Activity {
         logo.setScaleType(ImageView.ScaleType.FIT_START);
         logo.setContentDescription("TVLink");
         int logoWidth = Math.min(dp(260), (getResources().getDisplayMetrics().widthPixels - dp(72)) / 2);
-        identity.addView(logo, new LinearLayout.LayoutParams(logoWidth, dp(84)));
-        addAboutText(identity, "Version " + appVersion(), Color.WHITE, 20, 4);
+        int logoHeight = dp(84);
+        identity.addView(logo, new LinearLayout.LayoutParams(logoWidth, logoHeight));
+        // The first visible pixel of the T is 34 px from the left edge of the 820 × 239 PNG.
+        float logoScale = Math.min(logoWidth / 820f, logoHeight / 239f);
+        int textInset = Math.round(34 * logoScale);
+        addAboutText(identity, "Version " + appVersion(), Color.WHITE, 20, 4, textInset);
         addAboutText(identity, "Remote control, phone keyboard input and file transfer for Android TV.",
-                Color.WHITE, 18, 12);
-        addAboutText(identity, "Developed by NudroidLabs\nPublished by KebunApp", 0xffc0cce4, 16, 24);
+                Color.WHITE, 18, 12, textInset);
+        addAboutText(identity, "Developed by NudroidLabs\nPublished by KebunApp", 0xffc0cce4, 16, 24, textInset);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.VERTICAL);
@@ -348,7 +352,7 @@ public class MainActivity extends Activity {
         updates.requestFocus();
     }
 
-    private void addAboutText(LinearLayout parent, String value, int color, int size, int topMargin) {
+    private void addAboutText(LinearLayout parent, String value, int color, int size, int topMargin, int startMargin) {
         TextView text = new TextView(this);
         text.setText(value);
         text.setTextColor(color);
@@ -356,6 +360,7 @@ public class MainActivity extends Activity {
         text.setLineSpacing(dp(4), 1);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.topMargin = dp(topMargin);
+        params.setMarginStart(startMargin);
         parent.addView(text, params);
     }
 

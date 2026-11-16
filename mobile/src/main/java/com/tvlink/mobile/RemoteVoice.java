@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntConsumer;
 
 final class RemoteVoice {
+    static final String LOG_TAG = "TVLinkVoice";
     private static final int SAMPLE_RATE = 8000;
     private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
@@ -40,6 +41,9 @@ final class RemoteVoice {
                     if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
                 }
                 if (!stopped.get() || finish.get()) waitForTv(remote, session, stopped, finish);
+                if ((!stopped.get() || finish.get()) && !remote.isOpen()) {
+                    throw new IOException("Remote disconnected during voice input.");
+                }
             } finally {
                 remote.endVoice(session);
             }
@@ -52,6 +56,7 @@ final class RemoteVoice {
                                AtomicBoolean stopped, AtomicBoolean finish, IntConsumer level) throws IOException {
         byte[] chunk = new byte[CHUNK_BYTES];
         int used = 0;
+        boolean audioSent = false;
         boolean signalDetected = false;
         long nextLevel = 0;
         long until = SystemClock.elapsedRealtime() + MAX_DURATION_MS;
@@ -67,16 +72,22 @@ final class RemoteVoice {
             }
             used += count;
             if (used == chunk.length) {
-                if (!stopped.get() || finish.get()) remote.sendVoice(session, chunk);
+                if (!stopped.get() || finish.get()) audioSent |= remote.sendVoice(session, chunk);
                 used = 0;
             }
         }
+        if (!stopped.get() && remote.voiceActive(session) && SystemClock.elapsedRealtime() >= until) {
+            android.util.Log.d(LOG_TAG, "Session " + session + ": recording limit reached");
+        }
         if (used > 0 && remote.voiceActive(session) && (!stopped.get() || finish.get())) {
             Arrays.fill(chunk, used, chunk.length, (byte) 0);
-            remote.sendVoice(session, chunk);
+            audioSent |= remote.sendVoice(session, chunk);
         }
         if (!signalDetected && (!stopped.get() || finish.get())) {
             throw new IOException("No microphone signal detected.");
+        }
+        if (!audioSent && (!stopped.get() || finish.get())) {
+            throw new IOException("Voice audio could not be sent to the TV.");
         }
     }
 
@@ -92,6 +103,7 @@ final class RemoteVoice {
             long now = SystemClock.elapsedRealtime();
             if (!acknowledged && remote.voiceAcknowledged(session)) {
                 acknowledged = true;
+                android.util.Log.d(LOG_TAG, "Session " + session + ": audio acknowledged");
                 deadline = now + 3000;
             }
             if (now >= deadline) break;
@@ -107,7 +119,7 @@ final class RemoteVoice {
             }
         }
         if (remote.voiceActive(session) && !acknowledged && (!stopped.get() || finish.get())) {
-            throw new IOException("The TV did not acknowledge voice input.");
+            android.util.Log.d(LOG_TAG, "Session " + session + ": no acknowledgement before timeout");
         }
     }
 
