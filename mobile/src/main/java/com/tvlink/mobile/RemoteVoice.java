@@ -5,7 +5,6 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.SystemClock;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntConsumer;
 import java.util.function.Consumer;
@@ -87,10 +86,6 @@ final class RemoteVoice {
             android.util.Log.d(LOG_TAG, "Session " + session + ": recording limit reached");
         }
         if (!stopped.get() || finish.get()) diagnostic.accept("Recording ended");
-        if (used > 0 && remote.voiceActive(session) && (!stopped.get() || finish.get())) {
-            Arrays.fill(chunk, used, chunk.length, (byte) 0);
-            audioSent |= remote.sendVoice(session, chunk);
-        }
         if (!signalDetected && (!stopped.get() || finish.get())) {
             throw new IOException("No microphone signal detected.");
         }
