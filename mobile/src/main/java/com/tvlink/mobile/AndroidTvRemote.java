@@ -145,6 +145,14 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     private static final int IME_FEATURE = 1 << 2;
+    private static final int VOICE_FEATURE = 1 << 3;
+    private static final int VOICE_BEGIN = 30;
+    private static final int VOICE_PAYLOAD = 31;
+    private static final int VOICE_END = 32;
+    private volatile boolean voiceSupported;
+    private final Object voiceLock = new Object();
+    private java.util.concurrent.CompletableFuture<Integer> voiceBegin;
+    private volatile int voiceSession = -1;
     private java.util.function.Consumer<ImeState> imeListener;
     private ImeState imeState;
 
@@ -170,7 +178,7 @@ final class AndroidTvRemote implements AutoCloseable {
         final int power = 1 << 5;
         final int volume = 1 << 6;
         int features = ping | keys | power | volume;
-        if (listener != null) features |= IME_FEATURE;
+        if (listener != null) features |= IME_FEATURE | VOICE_FEATURE;
         boolean configured = false;
         int frames = 0;
         boolean activated = false;
@@ -190,6 +198,7 @@ final class AndroidTvRemote implements AutoCloseable {
                 Map<Integer, Object> config = parse((byte[]) message.get(1));
                 int offered = (Integer) config.getOrDefault(1, 0);
                 features &= offered;
+                voiceSupported = (features & VOICE_FEATURE) != 0;
                 log.accept("TV capabilities: " + offered + "; requested: " + features + ".");
                 if ((features & keys) == 0) throw new IOException("TV does not offer remote keys");
                 byte[] info = concat(number(3, 1), string(4, "1"), string(5, "atvremote"), string(6, "1.0.0"));
@@ -227,6 +236,7 @@ final class AndroidTvRemote implements AutoCloseable {
                 while (!closed) {
                     Map<Integer, Object> message = read();
                     pong(message);
+                    handleVoice(message);
                     handleIme(message);
                 }
             } catch (IOException ignored) {
@@ -291,6 +301,69 @@ final class AndroidTvRemote implements AutoCloseable {
             Map<Integer, Object> ping = parse((byte[]) message.get(8));
             write(field(9, number(1, (Integer) ping.getOrDefault(1, 0))));
         }
+    }
+
+    boolean supportsVoice() { return voiceSupported; }
+
+    int beginVoice() throws IOException {
+        java.util.concurrent.CompletableFuture<Integer> ready = new java.util.concurrent.CompletableFuture<>();
+        synchronized (voiceLock) {
+            if (closed || !voiceSupported) throw new IOException("TV voice input is unavailable.");
+            if (voiceBegin != null || voiceSession >= 0) throw new IOException("Voice input is already active.");
+            voiceBegin = ready;
+        }
+        boolean opened = false;
+        try {
+            key(android.view.KeyEvent.KEYCODE_SEARCH);
+            int session = ready.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!voiceActive(session)) throw new IOException("The TV ended voice input.");
+            write(field(VOICE_BEGIN, number(1, session)));
+            opened = true;
+            return session;
+        } catch (java.util.concurrent.TimeoutException error) {
+            throw new IOException("The TV didn’t start a voice session.", error);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Voice input was interrupted.", error);
+        } catch (java.util.concurrent.ExecutionException error) {
+            throw new IOException("Remote disconnected during voice input.", error);
+        } finally {
+            synchronized (voiceLock) {
+                voiceBegin = null;
+                if (!opened) voiceSession = -1;
+            }
+        }
+    }
+
+    private void handleVoice(Map<Integer, Object> message) throws IOException {
+        if (!message.containsKey(VOICE_BEGIN) && !message.containsKey(VOICE_END)) return;
+        synchronized (voiceLock) {
+            if (message.containsKey(VOICE_BEGIN) && voiceBegin != null && !voiceBegin.isDone()) {
+                Object id = nested(message, VOICE_BEGIN).get(1);
+                if (id instanceof Integer && (Integer) id >= 0) {
+                    voiceSession = (Integer) id;
+                    voiceBegin.complete(voiceSession);
+                }
+            }
+            if (message.containsKey(VOICE_END) && voiceSession >= 0) {
+                Object id = nested(message, VOICE_END).get(1);
+                if (Integer.valueOf(voiceSession).equals(id)) voiceSession = -1;
+            }
+        }
+    }
+
+    boolean voiceActive(int session) { return !closed && voiceSession == session; }
+
+    void sendVoice(int session, byte[] samples) throws IOException {
+        if (voiceActive(session)) write(field(VOICE_PAYLOAD, concat(number(1, session), field(2, samples))));
+    }
+
+    void endVoice(int session) throws IOException {
+        synchronized (voiceLock) {
+            if (!voiceActive(session)) return;
+            voiceSession = -1;
+        }
+        write(field(VOICE_END, number(1, session)));
     }
 
     boolean isOpen() { return !closed; }
@@ -372,6 +445,10 @@ final class AndroidTvRemote implements AutoCloseable {
 
     @Override public void close() {
         closed = true;
+        synchronized (voiceLock) {
+            voiceSession = -1;
+            if (voiceBegin != null) voiceBegin.completeExceptionally(new IOException("Remote disconnected."));
+        }
         try { socket.close(); } catch (IOException ignored) {}
         if (imeListener != null) imeListener.accept(null);
     }

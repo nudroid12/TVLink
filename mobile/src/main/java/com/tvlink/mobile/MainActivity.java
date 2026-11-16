@@ -1496,7 +1496,8 @@ public class MainActivity extends Activity {
     }
 
     private RemoteIconView remoteKey(String icon, String label, int key, boolean light, int radius) {
-        return remoteIcon(icon, label, () -> sendSystemKey(key), light, radius, false);
+        return remoteIcon(icon, label, "mic".equals(icon) ? this::startRemoteVoice : () -> sendSystemKey(key),
+                light, radius, false);
     }
 
     private void addDirection(android.widget.FrameLayout pad, String icon, String label, int key,
@@ -2151,7 +2152,80 @@ public class MainActivity extends Activity {
     private boolean remoteConnecting;
     private volatile int remoteSessionGeneration;
 
+    private static final int VOICE_PERMISSION_REQUEST = 241;
+    private AlertDialog voiceDialog;
+    private boolean voiceRunning;
+    private java.util.concurrent.atomic.AtomicBoolean finishVoice;
+
+    private void startRemoteVoice() {
+        AndroidTvRemote connection = remoteConnection;
+        if (voiceRunning || !started || remoteStatus == null || remoteConnecting) return;
+        if (connection == null || !connection.isOpen()) {
+            notifyUser("Connect to your TV before using the microphone.");
+            return;
+        }
+        if (!connection.supportsVoice()) {
+            notifyUser("This TV does not offer Remote voice input.");
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.RECORD_AUDIO}, VOICE_PERMISSION_REQUEST);
+            return;
+        }
+        java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicBoolean finish = new java.util.concurrent.atomic.AtomicBoolean();
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog)
+                .setTitle("Voice input")
+                .setMessage("Waiting for your TV…")
+                .setNegativeButton("Stop", (closed, which) -> finish.set(true))
+                .create();
+        dialog.setOnDismissListener(closed -> stopped.set(true));
+        voiceDialog = dialog;
+        finishVoice = finish;
+        voiceRunning = true;
+        dialog.show();
+        new Thread(() -> {
+            String failure = null;
+            try {
+                RemoteVoice.capture(connection, stopped, finish, () -> runOnUiThread(() -> {
+                    if (dialog.isShowing()) dialog.setMessage("Speak now. Tap Stop when you’re done.");
+                }));
+            } catch (java.io.IOException | RuntimeException error) {
+                if (!stopped.get()) {
+                    failure = error.getMessage() == null ? "Could not use the microphone." : error.getMessage();
+                }
+            } finally {
+                String message = failure;
+                runOnUiThread(() -> {
+                    if (voiceDialog != dialog) return;
+                    voiceDialog = null;
+                    finishVoice = null;
+                    voiceRunning = false;
+                    dialog.dismiss();
+                    if (message != null && started && remoteStatus != null) notifyUser(message);
+                });
+            }
+        }, "TVLink voice capture").start();
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == VOICE_PERMISSION_REQUEST) {
+            if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                if (remoteConnection != null && remoteConnection.isOpen() && started) startRemoteVoice();
+                else notifyUser("Tap the microphone again after the Remote reconnects.");
+            } else {
+                notifyUser("Allow microphone access to send voice commands.");
+            }
+        }
+    }
+
     private void suspendRemoteSession() {
+        if (voiceDialog != null) {
+            finishVoice.set(false);
+            voiceDialog.dismiss();
+        }
         remoteSessionGeneration++;
         updateRemoteIme(null);
         remoteConnecting = false;
