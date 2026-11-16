@@ -24,6 +24,7 @@ public class MainActivity extends Activity {
     private static final int FOCUS_BLUE = 0xff7fb1fe;
 
     private boolean showingHome;
+    private boolean showingAbout;
 
     @Override public void onCreate(Bundle state) {
         setTheme(R.style.TVLinkTelevisionTheme);
@@ -37,6 +38,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen() {
+        showingAbout = false;
         exitDeadline = 0;
         if (exitMessage != null) {
             exitMessage.cancel();
@@ -217,7 +219,8 @@ public class MainActivity extends Activity {
                 && !"My Files".equals(title) && !"Settings".equals(title)
                 && !"Send / Receive".equals(title);
         if (showBack) {
-            titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
+            Runnable back = "About".equals(title) ? this::showSettings : this::home;
+            titleRow.addView(button("Back", back), new LinearLayout.LayoutParams(dp(82), dp(42)));
         }
         TextView heading = new TextView(this);
         heading.setText(title);
@@ -299,7 +302,7 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         LinearLayout rows = feature("Settings");
-        setting(rows, "Check for updates", "Version " + appVersion(), () -> ReleaseCheck.check(this));
+        setting(rows, "About", "Version " + appVersion(), this::showAbout);
         setting(rows, "Device Name", TvSettings.device(this), () -> editSetting("Device Name", "device_name", TvSettings.device(this)));
         setting(rows, "Save received files to", TvSettings.directoryLabel(this), this::chooseDirectory);
         setting(rows, "Direct Downloads access", TvSettings.hasStorageAccess(this) ? "Allowed" : "Optional", this::requestStorageAccessFromSettings);
@@ -308,6 +311,73 @@ public class MainActivity extends Activity {
         toggle(rows, "Overwrite", "Replace files with the same name", "overwrite", false);
         toggle(rows, "Modify date", "Update the modified date when replacing files", "modify_date", true);
         rows.getChildAt(0).requestFocus();
+    }
+
+    private void showAbout() {
+        LinearLayout body = feature("About");
+        showingAbout = true;
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(0, dp(16), 0, dp(16));
+        int width = Math.min(dp(430), getResources().getDisplayMetrics().widthPixels - dp(48));
+        LinearLayout.LayoutParams contentSize = new LinearLayout.LayoutParams(width, -2);
+        contentSize.gravity = Gravity.CENTER_HORIZONTAL;
+        body.addView(content, contentSize);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.tv_tvlink_wordmark);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setContentDescription("TVLink");
+        content.addView(logo, new LinearLayout.LayoutParams(dp(160), dp(52)));
+
+        TextView identity = new TextView(this);
+        identity.setGravity(Gravity.CENTER);
+        identity.setText("Version " + appVersion() + "\nRemote control and file transfer for Android TV.");
+        identity.setTextColor(0xffc0cce4);
+        identity.setTextSize(14);
+        identity.setLineSpacing(dp(4), 1);
+        identity.setPadding(0, dp(4), 0, dp(16));
+        content.addView(identity, new LinearLayout.LayoutParams(-1, -2));
+
+        Button updates = addAboutAction(content, "Check for updates", () -> ReleaseCheck.check(this));
+        addAboutAction(content, "Support", this::showAboutSupport);
+        divider(content);
+
+        TextView credit = new TextView(this);
+        credit.setText("Developed by NudroidLabs\nPublished by KebunApp");
+        credit.setTextColor(0xffc0cce4);
+        credit.setTextSize(13);
+        credit.setLineSpacing(dp(4), 1);
+        credit.setPadding(dp(12), dp(12), dp(12), 0);
+        content.addView(credit, new LinearLayout.LayoutParams(-1, -2));
+        updates.requestFocus();
+    }
+
+    private Button addAboutAction(LinearLayout content, String label, Runnable action) {
+        divider(content);
+        Button row = button(label, action);
+        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(12), 0);
+        row.setBackground(flatRowBackground());
+        content.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+        return row;
+    }
+
+    private void showAboutSupport() {
+        String issues = "https://github.com/nudroid12/TVLink/issues";
+        new AlertDialog.Builder(this)
+                .setTitle("Support")
+                .setMessage("Report an issue with your device model and TVLink version.\n\n" + issues)
+                .setNegativeButton("Close", null)
+                .setPositiveButton("Open GitHub", (dialog, which) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(issues)));
+                    } catch (android.content.ActivityNotFoundException error) {
+                        Toast.makeText(this, "Open the GitHub link on your phone.", Toast.LENGTH_LONG).show();
+                    }
+                }).show();
     }
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
@@ -1491,7 +1561,8 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (showingHome) confirmBackExit();
+        if (showingAbout) showSettings();
+        else if (showingHome) confirmBackExit();
         else if (storageFolder != null) {
             if (storageFolder.equals(storageRoot)) showFiles();
             else {

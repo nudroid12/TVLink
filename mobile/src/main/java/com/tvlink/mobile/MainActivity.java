@@ -25,6 +25,7 @@ public class MainActivity extends Activity {
     private static final int FOCUS_BLUE = 0xff7fb1fe;
 
     private boolean showingHome;
+    private boolean showingAbout;
     private Button homePair;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener deviceListener =
             (prefs, key) -> {
@@ -93,6 +94,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout screen(String title) {
+        showingAbout = false;
         exitDeadline = 0;
         if (exitMessage != null) {
             exitMessage.cancel();
@@ -181,7 +183,7 @@ public class MainActivity extends Activity {
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(rows);
-        setting(rows, "Check for updates", "Version " + appVersion(), () -> ReleaseCheck.check(this));
+        setting(rows, "About", "Version " + appVersion(), this::showAbout);
         setting(rows, "Device Name", LocalSettings.device(this), () -> editSetting("Device Name", "device_name", LocalSettings.device(this)));
         setting(rows, "Save received files to", transferFolderLabel(), this::chooseDirectory);
         setting(rows, "Direct Downloads access", LocalSettings.hasStorageAccess(this) ? "Allowed" : "Optional", this::requestStorageAccess);
@@ -194,6 +196,91 @@ public class MainActivity extends Activity {
     private String transferFolderLabel() {
         return LocalSettings.hasStorageAccess(this) && getPreferences(MODE_PRIVATE).getBoolean("downloads", false)
                 ? "Downloads / TVLink" : "TVLink app folder";
+    }
+
+    private void showAbout() {
+        showingHome = false;
+        LinearLayout page = screen(null);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
+        Button back = button("←", this::showSettings);
+        back.setContentDescription("Back to Settings");
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        TextView heading = new TextView(this);
+        heading.setText("About");
+        heading.setTextSize(23);
+        heading.setTextColor(Color.WHITE);
+        heading.setPadding(dp(12), 0, 0, 0);
+        header.addView(heading);
+        divider(page);
+        ScrollView scroll = new ScrollView(this);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(body);
+        showingAbout = true;
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(0, dp(16), 0, dp(16));
+        int width = Math.min(dp(430), getResources().getDisplayMetrics().widthPixels - dp(48));
+        LinearLayout.LayoutParams contentSize = new LinearLayout.LayoutParams(width, -2);
+        contentSize.gravity = Gravity.CENTER_HORIZONTAL;
+        body.addView(content, contentSize);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.tvlink_wordmark);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setContentDescription("TVLink");
+        content.addView(logo, new LinearLayout.LayoutParams(dp(160), dp(52)));
+
+        TextView identity = new TextView(this);
+        identity.setGravity(Gravity.CENTER);
+        identity.setText("Version " + appVersion() + "\nRemote control and file transfer for Android TV.");
+        identity.setTextColor(0xffc0cce4);
+        identity.setTextSize(14);
+        identity.setLineSpacing(dp(4), 1);
+        identity.setPadding(0, dp(4), 0, dp(16));
+        content.addView(identity, new LinearLayout.LayoutParams(-1, -2));
+
+        addAboutAction(content, "Check for updates", () -> ReleaseCheck.check(this));
+        addAboutAction(content, "Support", this::showAboutSupport);
+        divider(content);
+
+        TextView credit = new TextView(this);
+        credit.setText("Developed by NudroidLabs\nPublished by KebunApp");
+        credit.setTextColor(0xffc0cce4);
+        credit.setTextSize(13);
+        credit.setLineSpacing(dp(4), 1);
+        credit.setPadding(dp(12), dp(12), dp(12), 0);
+        content.addView(credit, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private Button addAboutAction(LinearLayout content, String label, Runnable action) {
+        divider(content);
+        Button row = button(label, action);
+        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(12), 0);
+        row.setBackground(flatRowBackground());
+        content.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+        return row;
+    }
+
+    private void showAboutSupport() {
+        String issues = "https://github.com/nudroid12/TVLink/issues";
+        new AlertDialog.Builder(this)
+                .setTitle("Support")
+                .setMessage("Report an issue with your device model and TVLink version.\n\n" + issues)
+                .setNegativeButton("Close", null)
+                .setPositiveButton("Open GitHub", (dialog, which) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(issues)));
+                    } catch (android.content.ActivityNotFoundException error) {
+                        Toast.makeText(this, "Open the GitHub link on your phone.", Toast.LENGTH_LONG).show();
+                    }
+                }).show();
     }
 
     private void setting(LinearLayout rows, String title, String detail, Runnable action) {
@@ -2239,7 +2326,8 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (showingHome) confirmBackExit();
+        if (showingAbout) showSettings();
+        else if (showingHome) confirmBackExit();
         else home();
     }
 }
