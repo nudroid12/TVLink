@@ -238,7 +238,7 @@ public class MainActivity extends Activity {
 
         TextView identity = new TextView(this);
         identity.setGravity(Gravity.CENTER);
-        identity.setText("Version " + appVersion() + "\nRemote control and file transfer for Android TV.");
+        identity.setText("Version " + appVersion() + "\nRemote control, phone keyboard input and file transfer for Android TV.");
         identity.setTextColor(0xffc0cce4);
         identity.setTextSize(14);
         identity.setLineSpacing(dp(4), 1);
