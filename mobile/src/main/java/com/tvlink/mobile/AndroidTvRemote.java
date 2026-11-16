@@ -153,6 +153,7 @@ final class AndroidTvRemote implements AutoCloseable {
     private final Object voiceLock = new Object();
     private java.util.concurrent.CompletableFuture<Integer> voiceBegin;
     private volatile int voiceSession = -1;
+    private volatile int voiceAcknowledged = -1;
     private java.util.function.Consumer<ImeState> imeListener;
     private ImeState imeState;
 
@@ -336,14 +337,20 @@ final class AndroidTvRemote implements AutoCloseable {
     }
 
     private void handleVoice(Map<Integer, Object> message) throws IOException {
-        if (!message.containsKey(VOICE_BEGIN) && !message.containsKey(VOICE_END)) return;
+        if (!message.containsKey(VOICE_BEGIN) && !message.containsKey(VOICE_PAYLOAD)
+                && !message.containsKey(VOICE_END)) return;
         synchronized (voiceLock) {
             if (message.containsKey(VOICE_BEGIN) && voiceBegin != null && !voiceBegin.isDone()) {
                 Object id = nested(message, VOICE_BEGIN).get(1);
                 if (id instanceof Integer && (Integer) id >= 0) {
+                    voiceAcknowledged = -1;
                     voiceSession = (Integer) id;
                     voiceBegin.complete(voiceSession);
                 }
+            }
+            if (message.containsKey(VOICE_PAYLOAD) && voiceSession >= 0) {
+                Object id = nested(message, VOICE_PAYLOAD).get(1);
+                if (Integer.valueOf(voiceSession).equals(id)) voiceAcknowledged = voiceSession;
             }
             if (message.containsKey(VOICE_END) && voiceSession >= 0) {
                 Object id = nested(message, VOICE_END).get(1);
@@ -351,6 +358,8 @@ final class AndroidTvRemote implements AutoCloseable {
             }
         }
     }
+
+    boolean voiceAcknowledged(int session) { return voiceAcknowledged == session; }
 
     boolean voiceActive(int session) { return !closed && voiceSession == session; }
 

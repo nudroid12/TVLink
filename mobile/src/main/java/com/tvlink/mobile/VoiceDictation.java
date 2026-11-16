@@ -43,7 +43,7 @@ final class VoiceDictation implements RecognitionListener {
     void finish() {
         if (finished || recognizer == null) return;
         meter.label("Recognizing speech…");
-        meter.level(0);
+        meter.level(-1);
         try {
             recognizer.stopListening();
         } catch (RuntimeException error) {
@@ -77,7 +77,7 @@ final class VoiceDictation implements RecognitionListener {
     @Override public void onEndOfSpeech() {
         if (finished) return;
         meter.label("Recognizing speech…");
-        meter.level(0);
+        meter.level(-1);
     }
 
     @Override public void onResults(Bundle results) {

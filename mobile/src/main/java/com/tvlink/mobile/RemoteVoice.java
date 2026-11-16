@@ -11,7 +11,7 @@ import java.util.function.IntConsumer;
 
 final class RemoteVoice {
     private static final int SAMPLE_RATE = 8000;
-    private static final int CHUNK_BYTES = 8192;
+    private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
@@ -34,13 +34,14 @@ final class RemoteVoice {
                     throw new IOException("Could not start recording.");
                 }
                 level.accept(0);
-                stream(remote, session, recorder, stopped, finish, level);
-            } finally {
                 try {
-                    if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
+                    stream(remote, session, recorder, stopped, finish, level);
                 } finally {
-                    remote.endVoice(session);
+                    if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
                 }
+                if (!stopped.get() || finish.get()) waitForTv(remote, session, stopped, finish);
+            } finally {
+                remote.endVoice(session);
             }
         } finally {
             recorder.release();
@@ -76,6 +77,37 @@ final class RemoteVoice {
         }
         if (!signalDetected && (!stopped.get() || finish.get())) {
             throw new IOException("No microphone signal detected.");
+        }
+    }
+
+    private static void waitForTv(AndroidTvRemote remote, int session, AtomicBoolean stopped,
+                                  AtomicBoolean finish) throws IOException {
+        // Let the TV finish recognition after the phone mic is released.
+        byte[] silence = new byte[CHUNK_BYTES];
+        long start = SystemClock.elapsedRealtime();
+        long deadline = start + 6000;
+        long nextSilence = start;
+        boolean acknowledged = false;
+        while (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
+            long now = SystemClock.elapsedRealtime();
+            if (!acknowledged && remote.voiceAcknowledged(session)) {
+                acknowledged = true;
+                deadline = now + 3000;
+            }
+            if (now >= deadline) break;
+            if (!acknowledged && now >= nextSilence) {
+                remote.sendVoice(session, silence);
+                nextSilence = now + CHUNK_BYTES * 1000L / (SAMPLE_RATE * 2);
+            }
+            try {
+                Thread.sleep(60);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Voice processing interrupted.", error);
+            }
+        }
+        if (remote.voiceActive(session) && !acknowledged && (!stopped.get() || finish.get())) {
+            throw new IOException("The TV did not acknowledge voice input.");
         }
     }
 

@@ -1466,8 +1466,6 @@ public class MainActivity extends Activity {
         addRemoteControls(controls, "back", "Back", 4, "home", "Home", 3, "volume_up", "Volume up", 24, true);
         addRemoteControls(controls, "mic", "Voice assistant", 231, "mute", "Mute", 164,
                 "volume_down", "Volume down", 25, false);
-        remoteVoiceMeter = new VoiceMeter(this);
-        controls.addView(remoteVoiceMeter, new LinearLayout.LayoutParams(diameter, dp(40)));
         connectRemoteScreen(status);
     }
 
@@ -1501,7 +1499,8 @@ public class MainActivity extends Activity {
         if (!"mic".equals(icon)) return remoteIcon(icon, label, () -> sendSystemKey(key), light, radius, false);
         RemoteIconView button = remoteIcon(icon, "Hold to talk to TV",
                 () -> notifyUser("Hold the microphone while you speak."), light, radius, false);
-        bindVoiceHold(button, () -> startRemoteVoice(remoteVoiceMeter), this::finishAssistantVoice,
+        VoiceMeter meter = new VoiceMeter(button);
+        bindVoiceHold(button, () -> startRemoteVoice(meter), this::finishAssistantVoice,
                 this::cancelAssistantVoice);
         return button;
     }
@@ -2090,11 +2089,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams navigationSize = new LinearLayout.LayoutParams(-2, dp(48));
         navigationSize.gravity = Gravity.CENTER_HORIZONTAL;
         if (!isPasswordField(state.inputType)) {
-            VoiceMeter meter = new VoiceMeter(dialog.getContext());
-            page.addView(meter, new LinearLayout.LayoutParams(-1, dp(40)));
-            Button mic = button("Hold to dictate", () -> notifyUser("Hold the button while you speak."));
-            LinearLayout.LayoutParams micSize = new LinearLayout.LayoutParams(-2, dp(48));
+            RemoteIconView mic = remoteIcon("mic", "Hold to dictate",
+                    () -> notifyUser("Hold the microphone while you speak."), false, 24, false);
+            VoiceMeter meter = new VoiceMeter(mic);
+            LinearLayout.LayoutParams micSize = new LinearLayout.LayoutParams(dp(48), dp(48));
             micSize.gravity = Gravity.CENTER_HORIZONTAL;
+            micSize.bottomMargin = dp(8);
             page.addView(mic, micSize);
             bindVoiceHold(mic, () -> startDictation(dialog, editor, meter), this::finishDictation,
                     this::cancelDictation);
@@ -2170,7 +2170,6 @@ public class MainActivity extends Activity {
     private volatile int remoteSessionGeneration;
 
     private static final int VOICE_PERMISSION_REQUEST = 241;
-    private VoiceMeter remoteVoiceMeter;
     private AssistantVoiceHold assistantVoice;
     private VoiceDictation dictation;
 
@@ -2276,6 +2275,11 @@ public class MainActivity extends Activity {
     private static final class AssistantVoiceHold {
         final java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
         final java.util.concurrent.atomic.AtomicBoolean finish = new java.util.concurrent.atomic.AtomicBoolean();
+        final VoiceMeter meter;
+
+        AssistantVoiceHold(VoiceMeter meter) {
+            this.meter = meter;
+        }
     }
 
     private void startRemoteVoice(VoiceMeter meter) {
@@ -2295,7 +2299,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (!hasVoicePermission()) return;
-        AssistantVoiceHold hold = new AssistantVoiceHold();
+        AssistantVoiceHold hold = new AssistantVoiceHold(meter);
         assistantVoice = hold;
         meter.show("Waiting for your TV…");
         new Thread(() -> {
@@ -2327,13 +2331,15 @@ public class MainActivity extends Activity {
         if (assistantVoice == null) return;
         assistantVoice.finish.set(true);
         assistantVoice.stopped.set(true);
-        remoteVoiceMeter.label("Finishing…");
+        assistantVoice.meter.label("Waiting for the TV to process…");
+        assistantVoice.meter.level(-1);
     }
 
     private void cancelAssistantVoice() {
         if (assistantVoice == null) return;
         assistantVoice.finish.set(false);
         assistantVoice.stopped.set(true);
+        assistantVoice.meter.hide();
     }
 
     private void suspendRemoteSession() {
