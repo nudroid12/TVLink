@@ -41,14 +41,14 @@ jobs:
           fi
           patch="${patches[0]}"
           python3 - "$patch" <<'PYTHON'
-          """Overlay root-relative TVLink application files from a ZIP."""
+          """Overlay root-relative TVLink application and documentation files from a ZIP."""
           import stat
           import sys
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile
 
           MODULES = {"mobile", "tv", "shared", "universal"}
-          ROOT_FILES = {"settings.gradle.kts", "build.gradle.kts", "gradle.properties"}
+          ROOT_FILES = {"settings.gradle.kts", "build.gradle.kts", "gradle.properties", "README.md"}
           MAX_BYTES = 100 * 1024 * 1024
 
           with ZipFile(sys.argv[1]) as archive:
@@ -62,7 +62,11 @@ jobs:
                   path = PurePosixPath(raw)
                   safe_root = (path.parts and path.parts[0] in MODULES and len(path.parts) > 1)
                   safe_file = raw in ROOT_FILES
-                  if (not (safe_root or safe_file) or path.as_posix() != raw or
+                  safe_screenshot = (
+                      len(path.parts) == 2 and path.parts[0] == "screenshots"
+                      and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+                  )
+                  if (not (safe_root or safe_file or safe_screenshot) or path.as_posix() != raw or
                           ".." in path.parts or "\\" in raw or raw in seen or
                           stat.S_ISLNK(entry.external_attr >> 16)):
                       raise SystemExit(f"Invalid patch entry: {raw!r}")
