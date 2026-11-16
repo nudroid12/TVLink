@@ -15,7 +15,6 @@ final class RemoteVoice {
     private static final int SAMPLE_RATE = 8000;
     private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
-    private static final long RECOGNITION_TAIL_MS = 6000;
     private static final long RESPONSE_GRACE_MS = 12000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
@@ -104,11 +103,9 @@ final class RemoteVoice {
                                   AtomicBoolean finish, Consumer<String> diagnostic) throws IOException {
         // Stop recording on release and let the TV end the session after its response.
         // Bound the wait for TVs that leave the remote session open.
-        byte[] silence = new byte[CHUNK_BYTES];
         long start = SystemClock.elapsedRealtime();
         if (remote.voiceActive(session)) diagnostic.accept("Audio sent · waiting for TV");
         long deadline = start + RESPONSE_GRACE_MS;
-        long nextSilence = start;
         boolean acknowledged = false;
         while (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
             long now = SystemClock.elapsedRealtime();
@@ -120,10 +117,6 @@ final class RemoteVoice {
             if (now >= deadline) {
                 diagnostic.accept("12s response window ended");
                 break;
-            }
-            if (!acknowledged && now >= nextSilence && now - start < RECOGNITION_TAIL_MS) {
-                remote.sendVoice(session, silence);
-                nextSilence = now + CHUNK_BYTES * 1000L / (SAMPLE_RATE * 2);
             }
             try {
                 Thread.sleep(60);
