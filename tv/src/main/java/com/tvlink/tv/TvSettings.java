@@ -93,6 +93,22 @@ final class TvSettings {
         return new File(context.getFilesDir(), "received");
     }
 
+    static boolean isReceivedEntry(File root, File entry) {
+        try {
+            String rootPath = root.getAbsolutePath();
+            String entryPath = entry.getAbsolutePath();
+            if (!entryPath.startsWith(rootPath + File.separator) || !entry.canRead()) return false;
+            String relative = entryPath.substring(rootPath.length() + 1);
+            if (java.util.Arrays.stream(relative.split(File.separator)).anyMatch(part -> part.startsWith("."))) {
+                return false;
+            }
+            return entry.getCanonicalFile().equals(new File(root.getCanonicalFile(), relative))
+                    && (entry.isDirectory() || entry.isFile());
+        } catch (java.io.IOException error) {
+            return false;
+        }
+    }
+
     static boolean isDownloadsFile(File file) {
         return downloadsDirectory().equals(file.getParentFile());
     }

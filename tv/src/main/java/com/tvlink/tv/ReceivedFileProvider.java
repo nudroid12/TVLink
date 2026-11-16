@@ -21,6 +21,11 @@ public final class ReceivedFileProvider extends ContentProvider {
                 && ReleaseCheck.UPDATE_FILE.equals(uri.getLastPathSegment())) {
             return new File(getContext().getCacheDir(), ReleaseCheck.UPDATE_FILE);
         }
+        if (uri.getPathSegments().size() == 2 && "received".equals(uri.getPathSegments().get(0))) {
+            File file = new File(uri.getLastPathSegment());
+            if (file.isFile() && TvSettings.isReceivedEntry(TvSettings.directory(getContext()), file)) return file;
+            throw new IOException("Invalid received file");
+        }
         if (uri.getPathSegments().size() == 2 && "storage".equals(uri.getPathSegments().get(0))) {
             File file = new File(uri.getLastPathSegment());
             if (file.isFile() && TvSettings.canBrowse(getContext(), file)) return file;

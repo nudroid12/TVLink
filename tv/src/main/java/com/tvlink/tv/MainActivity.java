@@ -54,6 +54,7 @@ public class MainActivity extends Activity {
         page.setBackgroundColor(0xff101624);
         deviceCardName = null;
         deviceCard = null;
+        storageRoot = null;
         storageFolder = null;
         setContentView(page);
         return page;
@@ -1032,6 +1033,17 @@ public class MainActivity extends Activity {
     private boolean newestFirst = true;
     private File storageRoot;
     private File storageFolder;
+    private enum FilesView {
+        BOTH("Both"), FILES("Files only"), FOLDERS("Folders only");
+
+        final String label;
+        FilesView(String label) { this.label = label; }
+
+        boolean includes(File file) {
+            return file.isDirectory() ? this != FILES : file.isFile() && this != FOLDERS;
+        }
+    }
+    private FilesView filesView = FilesView.BOTH;
 
     private void browseStorage() {
         if (!TvSettings.hasStorageAccess(this)) {
@@ -1067,26 +1079,51 @@ public class MainActivity extends Activity {
 
     private void renderFiles() {
         File folderToRender = storageFolder;
+        File browseRoot = storageRoot;
+        boolean browsing = browseRoot != null;
+        File receiveRoot = received();
+        if (!browsing && folderToRender != null && !TvSettings.isReceivedEntry(receiveRoot, folderToRender)) {
+            folderToRender = null;
+        }
+        File folder = folderToRender != null ? folderToRender : receiveRoot;
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         addFilesToolbarButton(toolbar, "Received", this::showFiles);
         Button browse = addFilesToolbarButton(toolbar, "Browse storage", this::browseStorage);
-        toolbar.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        addFilesToolbarButton(toolbar, "Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
+        LinearLayout controls = toolbar;
+        if (getResources().getConfiguration().screenWidthDp < 840) {
+            controls = new LinearLayout(this);
+            controls.setGravity(Gravity.CENTER_VERTICAL);
+        }
+        controls.addView(new android.view.View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        if (!browsing) addFilesToolbarButton(controls, "New folder", () -> createReceivedFolder(receiveRoot, folder));
+        addFilesToolbarButton(controls, "Show: " + filesView.label, this::chooseFilesView);
+        addFilesToolbarButton(controls, "Sort: " + (newestFirst ? "Newest" : "Name"), () -> {
             newestFirst = !newestFirst;
             renderFiles();
         });
         LinearLayout body = feature("My Files", toolbar);
         filesToolbar = toolbar;
+        storageRoot = browseRoot;
         storageFolder = folderToRender;
-        boolean browsing = storageFolder != null;
+        if (controls != toolbar) body.addView(controls, new LinearLayout.LayoutParams(-1, dp(44)));
         divider(body);
-        if (browsing) info(body, storageFolder.getAbsolutePath());
-        File folder = browsing ? storageFolder : received();
-        File[] files = folder.listFiles(file -> !file.getName().startsWith(".")
-                && (browsing ? TvSettings.canBrowse(this, file) : isVisibleReceivedFile(folder, file)));
+        if (browsing) {
+            info(body, folder.getAbsolutePath());
+        } else {
+            String path = "Received / " + TvSettings.directoryLabel(this);
+            if (!folder.equals(receiveRoot)) {
+                path += " / " + folder.getAbsolutePath().substring(receiveRoot.getAbsolutePath().length() + 1)
+                        .replace(File.separator, " / ");
+            }
+            info(body, path);
+        }
+        File[] files = folder.listFiles(file -> !file.getName().startsWith(".") && filesView.includes(file)
+                && (browsing ? TvSettings.canBrowse(this, file) : TvSettings.isReceivedEntry(receiveRoot, file)));
         if (files == null || files.length == 0) {
-            info(body, files == null && folder.exists() ? "Cannot read this folder." : "This folder is empty.");
+            info(body, files == null && folder.exists() ? "Cannot read this folder."
+                    : filesView == FilesView.BOTH ? "This folder is empty."
+                    : filesView == FilesView.FILES ? "No files in this folder." : "No folders here.");
             browse.requestFocus();
             return;
         }
@@ -1095,19 +1132,49 @@ public class MainActivity extends Activity {
         java.util.Arrays.sort(files, newestFirst
                 ? java.util.Comparator.comparingLong(File::lastModified).reversed().thenComparing(byName)
                 : byName);
-        if (browsing) java.util.Arrays.sort(files, java.util.Comparator.comparing(File::isFile));
+        java.util.Arrays.sort(files, java.util.Comparator.comparing(File::isFile));
         int firstFile = body.getChildCount();
         for (File file : files) addFileRow(body, file);
         body.getChildAt(firstFile).requestFocus();
     }
 
-    private boolean isVisibleReceivedFile(File folder, File file) {
-        try {
-            return file.isFile() && file.canRead()
-                    && file.getCanonicalFile().equals(new File(folder.getCanonicalFile(), file.getName()));
-        } catch (IOException error) {
-            return false;
-        }
+    private void chooseFilesView() {
+        FilesView[] choices = FilesView.values();
+        String[] labels = new String[choices.length];
+        for (int index = 0; index < choices.length; index++) labels[index] = choices[index].label;
+        new AlertDialog.Builder(this).setTitle("Show")
+                .setSingleChoiceItems(labels, filesView.ordinal(), (dialog, which) -> {
+                    filesView = choices[which];
+                    dialog.dismiss();
+                    renderFiles();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void createReceivedFolder(File root, File folder) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Folder name");
+        AlertDialog editor = new AlertDialog.Builder(this).setTitle("New folder").setView(input)
+                .setNegativeButton("Cancel", null).setPositiveButton("Create", null).create();
+        showTextEditor(editor, input);
+        editor.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            try {
+                if (!root.equals(received()) || (!folder.equals(root) && !TvSettings.isReceivedEntry(root, folder))) {
+                    throw new IOException("Folder is unavailable");
+                }
+                File target = TransferServer.file(folder, input.getText().toString().trim());
+                if (!root.isDirectory() && !root.mkdirs() && !root.isDirectory()) {
+                    throw new IOException("Cannot open the received folder");
+                }
+                if (target.exists()) throw new IOException("That name is already in use");
+                if (!target.mkdir()) throw new IOException("Could not create folder");
+                if (filesView == FilesView.FILES) filesView = FilesView.BOTH;
+                editor.dismiss();
+                renderFiles();
+            } catch (IOException error) {
+                input.setError(error.getMessage());
+            }
+        });
     }
 
     private Button addFilesToolbarButton(LinearLayout toolbar, String title, Runnable action) {
@@ -1278,22 +1345,26 @@ public class MainActivity extends Activity {
     private void chooseMoveStorage(File file) {
         java.util.List<File> roots = new java.util.ArrayList<>();
         if (TvSettings.hasStorageAccess(this)) roots.addAll(TvSettings.storageRoots(this));
-        String[] labels = new String[roots.size() + 1];
+        File appFolder = new File(getFilesDir(), "received");
+        File receiveRoot = received();
+        boolean separateReceived = !receiveRoot.equals(appFolder);
+        String[] labels = new String[roots.size() + (separateReceived ? 2 : 1)];
         for (int i = 0; i < roots.size(); i++) {
             labels[i] = i == 0 ? "Internal storage" : "External storage · " + roots.get(i).getName();
         }
         int appFolderIndex = roots.size();
-        labels[appFolderIndex] = "TVLink app folder";
-        File appFolder = new File(getFilesDir(), "received");
+        labels[appFolderIndex] = separateReceived ? "TVLink app folder" : "Received / TVLink app folder";
+        int receivedIndex = appFolderIndex + 1;
+        if (separateReceived) labels[receivedIndex] = "Received / " + TvSettings.directoryLabel(this);
         new AlertDialog.Builder(this).setTitle("Move to").setItems(labels, (dialog, index) -> {
-            File root = index == appFolderIndex ? appFolder : roots.get(index);
-            chooseMoveFolder(file, root, root, index == appFolderIndex);
+            File root = index == receivedIndex ? receiveRoot : index == appFolderIndex ? appFolder : roots.get(index);
+            chooseMoveFolder(file, root, root, root.equals(appFolder));
         }).setNegativeButton("Cancel", null).show();
     }
 
     private void chooseMoveFolder(File file, File root, File folder, boolean appFolder) {
-        File[] children = appFolder ? new File[0] : folder.listFiles(entry ->
-                entry.isDirectory() && !entry.getName().startsWith(".") && TvSettings.canBrowse(this, entry));
+        File[] children = folder.listFiles(entry -> entry.isDirectory() && !entry.getName().startsWith(".")
+                && (appFolder ? TvSettings.isReceivedEntry(root, entry) : TvSettings.canBrowse(this, entry)));
         if (children == null) children = new File[0];
         java.util.Arrays.sort(children, java.util.Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
         File[] folders = children;
@@ -1303,20 +1374,20 @@ public class MainActivity extends Activity {
         if (!atRoot) labels[0] = "↑ Parent folder";
         for (int i = 0; i < folders.length; i++) labels[i + firstFolder] = folders[i].getName();
         AlertDialog.Builder picker = new AlertDialog.Builder(this)
-                .setTitle(appFolder ? "TVLink app folder" : folder.getName())
+                .setTitle(appFolder && folder.equals(root) ? "TVLink app folder" : folder.getName())
                 .setNegativeButton("Back", (dialog, which) -> {
                     if (atRoot) chooseMoveStorage(file);
-                    else chooseMoveFolder(file, root, folder.getParentFile(), false);
+                    else chooseMoveFolder(file, root, folder.getParentFile(), appFolder);
                 });
         if (labels.length > 0) picker.setItems(labels, (dialog, index) -> {
             File next = index < firstFolder ? folder.getParentFile() : folders[index - firstFolder];
-            chooseMoveFolder(file, root, next, false);
+            chooseMoveFolder(file, root, next, appFolder);
         });
         AlertDialog dialog = picker.setPositiveButton("Move here", (closed, which) ->
                 moveFile(file, root, folder, appFolder)).create();
         dialog.setOnCancelListener(closed -> {
             if (atRoot) chooseMoveStorage(file);
-            else chooseMoveFolder(file, root, folder.getParentFile(), false);
+            else chooseMoveFolder(file, root, folder.getParentFile(), appFolder);
         });
         dialog.show();
         if (folder.equals(file.getParentFile()) || (!appFolder && !folder.canWrite())) {
@@ -1331,12 +1402,15 @@ public class MainActivity extends Activity {
             String message;
             try {
                 if (appFolder) {
-                    if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) {
+                    if (!folder.equals(root) && !TvSettings.isReceivedEntry(root, folder)) {
+                        throw new IOException("Folder is unavailable");
+                    }
+                    if (!folder.isDirectory() && !folder.mkdir() && !folder.isDirectory()) {
                         throw new IOException("Cannot create TVLink app folder");
                     }
                 } else if (!TvSettings.hasStorageAccess(this)
-                        || !(folder.equals(root) ? TvSettings.storageRoots(this).contains(root)
-                                : TvSettings.canBrowse(this, folder))) {
+                        || !(folder.equals(root) && TvSettings.storageRoots(this).contains(root)
+                                || TvSettings.canBrowse(this, folder))) {
                     throw new IOException("Storage access is unavailable");
                 }
                 File target = TransferServer.file(folder, source.getName());
@@ -1357,7 +1431,7 @@ public class MainActivity extends Activity {
                         if (receivedFile) TvSettings.rememberReceivedFile(settings, target);
                     }
                 }
-                message = "Moved to " + (appFolder ? "TVLink app folder" : folder.getName());
+                message = "Moved to " + (appFolder && folder.equals(root) ? "TVLink app folder" : folder.getName());
             } catch (IOException | SecurityException error) {
                 message = error.getMessage() == null ? "Could not move file" : error.getMessage();
             }
@@ -1408,8 +1482,14 @@ public class MainActivity extends Activity {
             }
             android.net.Uri.Builder builder = new android.net.Uri.Builder().scheme("content")
                     .authority(getPackageName() + ".files");
-            android.net.Uri uri = storageFolder == null ? builder.appendPath(file.getName()).build()
-                    : builder.appendPath("storage").appendPath(file.getAbsolutePath()).build();
+            android.net.Uri uri;
+            if (storageRoot != null) {
+                uri = builder.appendPath("storage").appendPath(file.getAbsolutePath()).build();
+            } else if (storageFolder != null) {
+                uri = builder.appendPath("received").appendPath(file.getAbsolutePath()).build();
+            } else {
+                uri = builder.appendPath(file.getName()).build();
+            }
             String type = apk ? "application/vnd.android.package-archive" : getContentResolver().getType(uri);
             startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
@@ -1564,7 +1644,8 @@ public class MainActivity extends Activity {
         if (showingAbout) showSettings();
         else if (showingHome) confirmBackExit();
         else if (storageFolder != null) {
-            if (storageFolder.equals(storageRoot)) showFiles();
+            File parent = storageFolder.getParentFile();
+            if (storageFolder.equals(storageRoot) || (storageRoot == null && received().equals(parent))) showFiles();
             else {
                 storageFolder = storageFolder.getParentFile();
                 renderFiles();
