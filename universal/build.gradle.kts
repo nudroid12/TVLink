@@ -9,7 +9,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = providers.gradleProperty("universalVersionCode").map(String::toInt).getOrElse(1)
-        versionName = "0.5.54"
+        versionName = "0.5.55"
     }
 
     sourceSets {

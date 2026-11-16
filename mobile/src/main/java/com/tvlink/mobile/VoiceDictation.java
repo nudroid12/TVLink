@@ -42,8 +42,7 @@ final class VoiceDictation implements RecognitionListener {
 
     void finish() {
         if (finished || recognizer == null) return;
-        meter.label("Recognizing speech…");
-        meter.level(-1);
+        meter.processing("Recognizing speech…");
         try {
             recognizer.stopListening();
         } catch (RuntimeException error) {

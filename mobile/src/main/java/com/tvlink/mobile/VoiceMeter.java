@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -17,23 +18,25 @@ import java.util.Arrays;
 
 final class VoiceMeter {
     private final View anchor;
+    private final Button holdButton;
     private PopupWindow popup;
     private TextView status;
     private Waveform waveform;
 
-    VoiceMeter(View anchor) {
+    VoiceMeter(View anchor, Button holdButton) {
         this.anchor = anchor;
+        this.holdButton = holdButton;
     }
 
-    void show(String message) {
-        hide();
-        if (!anchor.isAttachedToWindow()) return;
+    void show(Runnable onDismiss) {
         Context context = anchor.getContext();
         FrameLayout overlay = new FrameLayout(context);
         overlay.setBackgroundColor(0x99000000);
+        overlay.setOnClickListener(view -> hide());
 
         LinearLayout panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setClickable(true);
         panel.setPadding(dp(20), dp(18), dp(20), dp(18));
         GradientDrawable background = new GradientDrawable();
         background.setColor(0xff1b2740);
@@ -45,17 +48,27 @@ final class VoiceMeter {
 
         TextView title = text(context, "Voice input", 22);
         panel.addView(title);
-        status = text(context, message, 16);
+        status = text(context, "", 16);
         status.setPadding(0, dp(8), 0, dp(6));
         panel.addView(status);
         waveform = new Waveform(context);
         panel.addView(waveform, new LinearLayout.LayoutParams(-1, dp(36)));
 
+        LinearLayout.LayoutParams buttonSize = new LinearLayout.LayoutParams(-2, dp(48));
+        buttonSize.gravity = Gravity.END;
+        buttonSize.topMargin = dp(12);
+        panel.addView(holdButton, buttonSize);
+        ready(null);
+
         popup = new PopupWindow(overlay, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT, false);
+                ViewGroup.LayoutParams.MATCH_PARENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        // The original mic button keeps receiving the held pointer and its release.
-        popup.setTouchable(false);
+        popup.setOnDismissListener(() -> {
+            popup = null;
+            status = null;
+            waveform = null;
+            onDismiss.run();
+        });
         popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
         popup.showAtLocation(anchor, Gravity.CENTER, 0, 0);
     }
@@ -76,11 +89,20 @@ final class VoiceMeter {
         if (waveform != null) waveform.push(value);
     }
 
+    void processing(String message) {
+        label(message);
+        level(-1);
+        holdButton.setEnabled(false);
+    }
+
+    void ready(String message) {
+        label(message == null ? "Hold the button while you speak." : message);
+        level(-1);
+        holdButton.setEnabled(true);
+    }
+
     void hide() {
         if (popup != null) popup.dismiss();
-        popup = null;
-        status = null;
-        waveform = null;
     }
 
     private int dp(int value) {
