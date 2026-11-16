@@ -7,10 +7,6 @@ on:
         description: 'Release tag, for example v1.0.0'
         required: true
         type: string
-      commit:
-        description: 'Full SHA of the build commit (leave blank to use main)'
-        required: false
-        type: string
 
 permissions:
   actions: read
@@ -34,54 +30,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          SOURCE_COMMIT: ${{ inputs.commit }}
         run: |
           set -euo pipefail
-          SOURCE_COMMIT="${SOURCE_COMMIT:-$GITHUB_SHA}"
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ||
-                ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Enter a tag like v1.0.0 and the full 40-character build commit SHA."
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Enter a tag like v1.0.0."
             exit 1
           fi
-          git merge-base --is-ancestor "$SOURCE_COMMIT" HEAD
           version="${RELEASE_TAG#v}"
-          for module in mobile tv universal; do
-            declared="$(git show "$SOURCE_COMMIT:$module/build.gradle.kts" |
+          runs="$(gh run list --workflow build-tvlink-universal.yml --branch main \
+            --status success --limit 50 --json databaseId,headSha,event \
+            --jq '.[] | select(.event == "push" or .event == "workflow_dispatch") | [.databaseId, .headSha] | @tsv')"
+          SOURCE_COMMIT=
+          while IFS=$'\t' read -r run_id sha; do
+            [[ -n "$run_id" ]] || continue
+            git merge-base --is-ancestor "$sha" HEAD || continue
+            declared="$(git show "$sha:universal/build.gradle.kts" |
               sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p')"
-            if [[ "$declared" != "$version" ]]; then
-              echo "::error::$module versionName must match $version at $SOURCE_COMMIT."
-              exit 1
-            fi
-          done
+            [[ "$declared" == "$version" ]] || continue
+            found="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+              --jq '.artifacts[] | select(.expired == false) | .name')"
+            grep -Fxq TVLink-Universal <<< "$found" || continue
+            gh run download "$run_id" --name TVLink-Universal --dir stable-artifacts/TVLink-Universal
+            SOURCE_COMMIT="$sha"
+            break
+          done <<< "$runs"
+          if [[ -z "$SOURCE_COMMIT" ]]; then
+            echo "::error::No matching Universal APK. Run TVLink Universal Build once on main with version $version, then retry."
+            exit 1
+          fi
 
-          download_build() {
-            local workflow="$1"
-            shift
-            local run_id artifact found complete
-            local runs
-            runs="$(gh run list --workflow "$workflow" --branch main --commit "$SOURCE_COMMIT" \
-              --status success --limit 30 --json databaseId --jq '.[].databaseId')"
-            while IFS= read -r run_id; do
-              [[ -n "$run_id" ]] || continue
-              found="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
-                --jq '.artifacts[] | select(.expired == false) | .name')"
-              complete=true
-              for artifact in "$@"; do
-                if ! grep -Fxq -- "$artifact" <<< "$found"; then complete=false; fi
-              done
-              if [[ "$complete" == true ]]; then
-                for artifact in "$@"; do
-                  gh run download "$run_id" --name "$artifact" --dir "stable-artifacts/$artifact"
-                done
-                return
-              fi
-            done <<< "$runs"
-            echo "::error::No successful $workflow build on main with all required artifacts for $SOURCE_COMMIT. Run it manually on that commit (scope both for Mobile/TV)."
-            return 1
-          }
-
-          download_build build-tvlink-apks.yml TVLink-MOBILE-release TVLink-TV-release
-          download_build build-tvlink-universal.yml TVLink-Universal
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
           if [[ ! -x "$sdk/build-tools/34.0.0/apksigner" ]]; then
             sdkmanager --sdk_root="$sdk" --install 'build-tools;34.0.0'
@@ -104,8 +81,6 @@ jobs:
             fi
             cp -- "$apk" "stable-release/TVLink-$RELEASE_TAG-$label.apk"
           }
-          stage_apk TVLink-MOBILE-release com.tvlink.mobile Android-Mobile
-          stage_apk TVLink-TV-release com.tvlink.tv Android-TV
           stage_apk TVLink-Universal com.tvlink.universal Universal
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
@@ -123,8 +98,6 @@ jobs:
             release_target=(--verify-tag)
           fi
           notes="$(printf '%s\n' '## APK downloads' '' \
-            '- **Android Mobile** for Android phones and tablets.' \
-            '- **Android TV** for Android TV devices.' \
             '- **Universal (Android Mobile & Android TV)** for both device types.')"
           gh release create "$RELEASE_TAG" stable-release/*.apk "${release_target[@]}" \
             --title "TVLink $RELEASE_TAG" --notes "$notes" --latest
