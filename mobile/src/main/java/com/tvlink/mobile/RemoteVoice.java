@@ -5,6 +5,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.SystemClock;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntConsumer;
 import java.util.function.Consumer;
@@ -14,8 +15,6 @@ final class RemoteVoice {
     private static final int SAMPLE_RATE = 8000;
     private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
-    private static final long RECOGNITION_TAIL_MS = 6000;
-    private static final long RESPONSE_GRACE_MS = 12000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
                         IntConsumer level, Consumer<String> diagnostic) throws IOException {
@@ -42,9 +41,11 @@ final class RemoteVoice {
                 } finally {
                     if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
                 }
-                if (!stopped.get() || finish.get()) waitForTv(remote, session, stopped, finish, diagnostic);
                 if ((!stopped.get() || finish.get()) && !remote.isOpen()) {
                     throw new IOException("Remote disconnected during voice input.");
+                }
+                if ((!stopped.get() || finish.get()) && remote.voiceActive(session)) {
+                    diagnostic.accept("Audio sent");
                 }
             } finally {
                 if (remote.endVoice(session)) {
@@ -87,48 +88,15 @@ final class RemoteVoice {
             android.util.Log.d(LOG_TAG, "Session " + session + ": recording limit reached");
         }
         if (!stopped.get() || finish.get()) diagnostic.accept("Recording ended");
+        if (used > 0 && remote.voiceActive(session) && (!stopped.get() || finish.get())) {
+            Arrays.fill(chunk, used, chunk.length, (byte) 0);
+            audioSent |= remote.sendVoice(session, chunk);
+        }
         if (!signalDetected && (!stopped.get() || finish.get())) {
             throw new IOException("No microphone signal detected.");
         }
         if (!audioSent && (!stopped.get() || finish.get())) {
             throw new IOException("Voice audio could not be sent to the TV.");
-        }
-    }
-
-    private static void waitForTv(AndroidTvRemote remote, int session, AtomicBoolean stopped,
-                                  AtomicBoolean finish, Consumer<String> diagnostic) throws IOException {
-        // Stop recording on release and let the TV end the session after its response.
-        // Bound the wait for TVs that leave the remote session open.
-        byte[] silence = new byte[CHUNK_BYTES];
-        long start = SystemClock.elapsedRealtime();
-        if (remote.voiceActive(session)) diagnostic.accept("Audio sent · waiting for TV");
-        long deadline = start + RESPONSE_GRACE_MS;
-        long nextSilence = start;
-        boolean acknowledged = false;
-        while (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
-            long now = SystemClock.elapsedRealtime();
-            if (!acknowledged && remote.voiceAcknowledged(session)) {
-                acknowledged = true;
-                diagnostic.accept("TV acknowledged audio");
-                android.util.Log.d(LOG_TAG, "Session " + session + ": audio acknowledged");
-            }
-            if (now >= deadline) {
-                diagnostic.accept("12s response window ended");
-                break;
-            }
-            if (!acknowledged && now >= nextSilence && now - start < RECOGNITION_TAIL_MS) {
-                remote.sendVoice(session, silence);
-                nextSilence = now + CHUNK_BYTES * 1000L / (SAMPLE_RATE * 2);
-            }
-            try {
-                Thread.sleep(60);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Voice processing interrupted.", error);
-            }
-        }
-        if (remote.voiceActive(session) && (!stopped.get() || finish.get())) {
-            android.util.Log.d(LOG_TAG, "Session " + session + ": response window ended; acknowledged=" + acknowledged);
         }
     }
 
