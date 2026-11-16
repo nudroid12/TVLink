@@ -14,7 +14,7 @@
 
 | Android TV Home (recreated preview) | Mobile Home |
 | :---: | :---: |
-| <img src="screenshots/tv-home.png" alt="TVLink Home on Android TV" width="480"> | <img src="screenshots/mobile-home.jpg" alt="TVLink Home on an Android phone" width="220"> |
+| <img src="screenshots/tv-home.png" alt="TVLink Home on Android TV" width="480"> | <img src="screenshots/mobile-home.png" alt="TVLink Home on an Android phone" width="220"> |
 
 ## Features
 
