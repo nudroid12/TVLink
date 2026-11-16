@@ -20,6 +20,9 @@ final class VoiceMeter {
     private final View holdButton;
     private PopupWindow popup;
     private TextView status;
+    private LinearLayout panel;
+    private TextView diagnostics;
+    private android.widget.ScrollView diagnosticsScroll;
     private Waveform waveform;
 
     VoiceMeter(View anchor, View holdButton) {
@@ -33,7 +36,7 @@ final class VoiceMeter {
         overlay.setBackgroundColor(0x99000000);
         overlay.setOnClickListener(view -> hide());
 
-        LinearLayout panel = new LinearLayout(context);
+        panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setClickable(true);
         panel.setPadding(dp(20), dp(18), dp(20), dp(18));
@@ -66,6 +69,9 @@ final class VoiceMeter {
             popup = null;
             status = null;
             waveform = null;
+            panel = null;
+            diagnostics = null;
+            diagnosticsScroll = null;
             onDismiss.run();
         });
         popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
@@ -78,6 +84,31 @@ final class VoiceMeter {
         view.setTextColor(Color.WHITE);
         view.setTextSize(size);
         return view;
+    }
+
+    void beginDiagnostics() {
+        if (panel == null) return;
+        if (diagnostics == null) {
+            diagnostics = text(panel.getContext(), "", 11);
+            diagnostics.setTypeface(android.graphics.Typeface.MONOSPACE);
+            diagnostics.setTextIsSelectable(true);
+            diagnosticsScroll = new android.widget.ScrollView(panel.getContext());
+            diagnosticsScroll.addView(diagnostics);
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, dp(116));
+            size.topMargin = dp(8);
+            panel.addView(diagnosticsScroll, size);
+        }
+        diagnostics.setText("Voice diagnostics");
+        diagnosticsScroll.scrollTo(0, 0);
+    }
+
+    void addDiagnostic(String line) {
+        if (diagnostics == null) return;
+        diagnostics.append("\n" + line);
+        android.widget.ScrollView scroll = diagnosticsScroll;
+        scroll.post(() -> {
+            if (diagnosticsScroll == scroll) scroll.scrollTo(0, diagnostics.getHeight());
+        });
     }
 
     void label(String message) {
@@ -114,7 +145,7 @@ final class VoiceMeter {
 
         Waveform(Context context) {
             super(context);
-            paint.setColor(MainActivity.FOCUS_BLUE);
+            paint.setColor(MainActivity.REMOTE_BLUE);
             paint.setStrokeCap(Paint.Cap.ROUND);
         }
 

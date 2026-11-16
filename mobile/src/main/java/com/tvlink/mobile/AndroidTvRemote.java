@@ -372,13 +372,14 @@ final class AndroidTvRemote implements AutoCloseable {
         return true;
     }
 
-    void endVoice(int session) throws IOException {
+    boolean endVoice(int session) throws IOException {
         synchronized (voiceLock) {
-            if (!voiceActive(session)) return;
+            if (!voiceActive(session)) return false;
             voiceSession = -1;
         }
         write(field(VOICE_END, number(1, session)));
         android.util.Log.d(RemoteVoice.LOG_TAG, "Session " + session + ": VOICE_END sent to TV");
+        return true;
     }
 
     boolean isOpen() { return !closed; }

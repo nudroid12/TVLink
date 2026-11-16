@@ -22,7 +22,7 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final boolean TV = false;
 
-    static final int FOCUS_BLUE = 0xff7fb1fe;
+    private static final int FOCUS_BLUE = 0xff7fb1fe;
 
     private boolean showingHome;
     private boolean showingAbout;
@@ -1394,6 +1394,7 @@ public class MainActivity extends Activity {
     private boolean remotePairing;
 
     private static final int REMOTE_NAVY = 0xff0b1329;
+    static final int REMOTE_BLUE = 0xffaec0ff;
 
     private void showRemote() {
         showingHome = false;
@@ -1408,13 +1409,13 @@ public class MainActivity extends Activity {
         title.setText("Remote");
         title.setTextSize(26);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setTextColor(FOCUS_BLUE);
+        title.setTextColor(REMOTE_BLUE);
         title.setGravity(Gravity.CENTER);
         header.addView(title, new LinearLayout.LayoutParams(-1, -1));
 
         TextView status = info(page, "Connecting…");
         status.setGravity(Gravity.CENTER);
-        status.setTextColor(FOCUS_BLUE);
+        status.setTextColor(REMOTE_BLUE);
         status.setMaxLines(2);
         remoteStatus = status;
         status.setOnClickListener(view -> showDevice());
@@ -1441,7 +1442,7 @@ public class MainActivity extends Activity {
         int height = getResources().getDisplayMetrics().heightPixels;
         int diameter = Math.max(dp(170), Math.min(dp(300), Math.min(width - dp(64), height / 3)));
         android.widget.FrameLayout pad = new android.widget.FrameLayout(this);
-        pad.setBackground(remoteBackground(FOCUS_BLUE, 0, 200));
+        pad.setBackground(remoteBackground(REMOTE_BLUE, 0, 200));
         LinearLayout.LayoutParams padSize = new LinearLayout.LayoutParams(diameter, diameter);
         padSize.setMargins(0, dp(24), 0, dp(30));
         controls.addView(pad, padSize);
@@ -1452,7 +1453,7 @@ public class MainActivity extends Activity {
         addDirection(pad, "right", "Right", 22, Gravity.RIGHT | Gravity.CENTER_VERTICAL, target);
         Button ok = button("OK", () -> sendSystemKey(23));
         ok.setPadding(0, 0, 0, 0);
-        ok.setTextColor(FOCUS_BLUE);
+        ok.setTextColor(REMOTE_BLUE);
         ok.setTextSize(22);
         ok.setBackground(remoteBackground(REMOTE_NAVY, 0, 120));
         int center = Math.round(diameter * .42f);
@@ -1467,7 +1468,7 @@ public class MainActivity extends Activity {
     private StateListDrawable remoteBackground(int fill, int border, int radius) {
         StateListDrawable background = new StateListDrawable();
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(fill == FOCUS_BLUE ? 0xff9ac2ff : 0xff31446d);
+        pressed.setColor(fill == REMOTE_BLUE ? FOCUS_BLUE : 0xff31446d);
         pressed.setStroke(dp(2), FOCUS_BLUE);
         pressed.setCornerRadius(dp(radius));
         GradientDrawable normal = new GradientDrawable();
@@ -1483,8 +1484,8 @@ public class MainActivity extends Activity {
     private RemoteIconView remoteIcon(String icon, String label, Runnable action, boolean light,
                                       int radius, boolean onPad) {
         RemoteIconView button = new RemoteIconView(this, icon, label,
-                light || onPad ? REMOTE_NAVY : FOCUS_BLUE);
-        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? FOCUS_BLUE : REMOTE_NAVY,
+                light || onPad ? REMOTE_NAVY : REMOTE_BLUE);
+        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_BLUE : REMOTE_NAVY,
                 light || onPad ? 0 : CONTENT_DIVIDER, radius));
         button.setOnClickListener(view -> action.run());
         return button;
@@ -2053,7 +2054,7 @@ public class MainActivity extends Activity {
 
         TextView device = new TextView(dialog.getContext());
         device.setText(linkedTvName());
-        device.setTextColor(FOCUS_BLUE);
+        device.setTextColor(REMOTE_BLUE);
         device.setTextSize(22);
         device.setGravity(Gravity.CENTER);
         page.addView(device, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -2290,6 +2291,7 @@ public class MainActivity extends Activity {
         final java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
         final java.util.concurrent.atomic.AtomicBoolean finish = new java.util.concurrent.atomic.AtomicBoolean();
         final VoiceMeter meter;
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
 
         AssistantVoiceHold(VoiceMeter meter) {
             this.meter = meter;
@@ -2314,6 +2316,8 @@ public class MainActivity extends Activity {
         if (!hasVoicePermission()) return;
         AssistantVoiceHold hold = new AssistantVoiceHold(meter);
         assistantVoice = hold;
+        meter.beginDiagnostics();
+        assistantDiagnostic(hold, "Mic pressed");
         meter.label("Waiting for your TV…");
         new Thread(() -> {
             String failure = null;
@@ -2323,13 +2327,14 @@ public class MainActivity extends Activity {
                         meter.label("Listening · release to finish");
                         meter.level(level);
                     }
-                }));
+                }), event -> assistantDiagnostic(hold, event));
             } catch (IOException | RuntimeException error) {
                 if (!hold.stopped.get() || hold.finish.get()) {
                     failure = error.getMessage() == null ? "Could not use the microphone." : error.getMessage();
                 }
             } finally {
                 String message = failure;
+                assistantDiagnostic(hold, message == null ? "Session finished" : "Session failed");
                 runOnUiThread(() -> {
                     if (assistantVoice != hold) return;
                     assistantVoice = null;
@@ -2339,8 +2344,17 @@ public class MainActivity extends Activity {
         }, "TVLink voice capture").start();
     }
 
+    private void assistantDiagnostic(AssistantVoiceHold hold, String event) {
+        double seconds = (android.os.SystemClock.elapsedRealtime() - hold.startedAt) / 1000.0;
+        String line = String.format(java.util.Locale.US, "+%.2fs  %s", seconds, event);
+        runOnUiThread(() -> {
+            if (assistantVoice == hold) hold.meter.addDiagnostic(line);
+        });
+    }
+
     private void finishAssistantVoice() {
         if (assistantVoice == null) return;
+        assistantDiagnostic(assistantVoice, "Mic released");
         assistantVoice.finish.set(true);
         assistantVoice.stopped.set(true);
         assistantVoice.meter.processing("Waiting for the TV to process…");

@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntConsumer;
+import java.util.function.Consumer;
 
 final class RemoteVoice {
     static final String LOG_TAG = "TVLinkVoice";
@@ -18,7 +19,7 @@ final class RemoteVoice {
     private static final long RESPONSE_GRACE_MS = 10000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
-                        IntConsumer level) throws IOException {
+                        IntConsumer level, Consumer<String> diagnostic) throws IOException {
         int minimum = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
         if (minimum <= 0) throw new IOException("This phone cannot record the Remote voice format.");
@@ -38,16 +39,20 @@ final class RemoteVoice {
                 }
                 level.accept(0);
                 try {
-                    stream(remote, session, recorder, stopped, finish, level);
+                    stream(remote, session, recorder, stopped, finish, level, diagnostic);
                 } finally {
                     if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
                 }
-                if (!stopped.get() || finish.get()) waitForTv(remote, session, stopped, finish);
+                if (!stopped.get() || finish.get()) waitForTv(remote, session, stopped, finish, diagnostic);
                 if ((!stopped.get() || finish.get()) && !remote.isOpen()) {
                     throw new IOException("Remote disconnected during voice input.");
                 }
             } finally {
-                remote.endVoice(session);
+                if (remote.endVoice(session)) {
+                    diagnostic.accept("VOICE_END sent to TV");
+                } else if (remote.isOpen()) {
+                    diagnostic.accept("VOICE_END received from TV");
+                }
             }
         } finally {
             recorder.release();
@@ -55,7 +60,7 @@ final class RemoteVoice {
     }
 
     private static void stream(AndroidTvRemote remote, int session, AudioRecord recorder,
-                               AtomicBoolean stopped, AtomicBoolean finish, IntConsumer level) throws IOException {
+                               AtomicBoolean stopped, AtomicBoolean finish, IntConsumer level, Consumer<String> diagnostic) throws IOException {
         byte[] chunk = new byte[CHUNK_BYTES];
         int used = 0;
         boolean audioSent = false;
@@ -79,8 +84,10 @@ final class RemoteVoice {
             }
         }
         if (!stopped.get() && remote.voiceActive(session) && SystemClock.elapsedRealtime() >= until) {
+            diagnostic.accept("8s recording limit reached");
             android.util.Log.d(LOG_TAG, "Session " + session + ": recording limit reached");
         }
+        if (!stopped.get() || finish.get()) diagnostic.accept("Recording ended");
         if (used > 0 && remote.voiceActive(session) && (!stopped.get() || finish.get())) {
             Arrays.fill(chunk, used, chunk.length, (byte) 0);
             audioSent |= remote.sendVoice(session, chunk);
@@ -94,11 +101,12 @@ final class RemoteVoice {
     }
 
     private static void waitForTv(AndroidTvRemote remote, int session, AtomicBoolean stopped,
-                                  AtomicBoolean finish) throws IOException {
+                                  AtomicBoolean finish, Consumer<String> diagnostic) throws IOException {
         // Stop recording on release and let the TV end the session after its response.
         // Bound the wait for TVs that leave the remote session open.
         byte[] silence = new byte[CHUNK_BYTES];
         long start = SystemClock.elapsedRealtime();
+        if (remote.voiceActive(session)) diagnostic.accept("Audio sent · waiting for TV");
         long deadline = start + RESPONSE_GRACE_MS;
         long nextSilence = start;
         boolean acknowledged = false;
@@ -106,9 +114,13 @@ final class RemoteVoice {
             long now = SystemClock.elapsedRealtime();
             if (!acknowledged && remote.voiceAcknowledged(session)) {
                 acknowledged = true;
+                diagnostic.accept("TV acknowledged audio");
                 android.util.Log.d(LOG_TAG, "Session " + session + ": audio acknowledged");
             }
-            if (now >= deadline) break;
+            if (now >= deadline) {
+                diagnostic.accept("10s response window ended");
+                break;
+            }
             if (!acknowledged && now >= nextSilence && now - start < RECOGNITION_TAIL_MS) {
                 remote.sendVoice(session, silence);
                 nextSilence = now + CHUNK_BYTES * 1000L / (SAMPLE_RATE * 2);
