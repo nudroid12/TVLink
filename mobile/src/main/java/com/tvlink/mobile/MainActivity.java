@@ -22,6 +22,7 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final boolean TV = false;
 
+    private static final int FOCUS_BLUE = 0xff7fb1fe;
 
     private boolean showingHome;
     private Button homePair;
@@ -108,7 +109,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(getColor(R.color.tvlink_background));
+        page.setBackgroundColor(0xff101624);
         showingTransfers = false;
         setContentView(page);
         if (title == null) return page;
@@ -125,7 +126,7 @@ public class MainActivity extends Activity {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(fill);
         shape.setCornerRadius(dp(12));
-        shape.setStroke(dp(focused ? 3 : 1), focused ? getColor(R.color.tvlink_accent) : getColor(R.color.tvlink_border));
+        shape.setStroke(dp(focused ? 3 : 1), focused ? FOCUS_BLUE : CONTENT_DIVIDER);
         return shape;
     }
 
@@ -147,7 +148,7 @@ public class MainActivity extends Activity {
         StateListDrawable background = new StateListDrawable();
         background.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
         background.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
-        background.addState(new int[] {}, tile(getColor(R.color.tvlink_surface), false));
+        background.addState(new int[] {}, tile(0xff1b2740, false));
         button.setBackground(background);
         button.setOnClickListener(view -> action.run());
         return button;
@@ -245,7 +246,7 @@ public class MainActivity extends Activity {
         TextView description = new TextView(this);
         description.setText(detail);
         description.setTextSize(13);
-        description.setTextColor(getColor(R.color.tvlink_secondary));
+        description.setTextColor(0xffb8c3d6);
         LinearLayout.LayoutParams descriptionSize = new LinearLayout.LayoutParams(-1, -2);
         descriptionSize.topMargin = dp(2);
         labels.addView(description, descriptionSize);
@@ -256,7 +257,7 @@ public class MainActivity extends Activity {
         }
 
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(getColor(R.color.tvlink_border));
+        line.setBackgroundColor(CONTENT_DIVIDER);
         rows.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
@@ -327,11 +328,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int CONTENT_DIVIDER = 0xff34425a;
 
     private void divider(LinearLayout page) {
 
         android.view.View line = new android.view.View(this);
-        line.setBackgroundColor(getColor(R.color.tvlink_border));
+        line.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
         params.setMargins(0, dp(8), 0, dp(8));
         page.addView(line, params);
@@ -399,6 +401,14 @@ public class MainActivity extends Activity {
         addTransferHeading(body, "Send");
         Button send = hasFilePairing() ? button("Send file", this::chooseFileToSend)
                 : button("Pair TV", () -> pairSystemRemote(this::showTransfers));
+        if (hasFilePairing()) {
+            StateListDrawable background = new StateListDrawable();
+            background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
+            background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
+            background.addState(new int[] {}, tile(0xff82aaff, false));
+            send.setBackground(background);
+            send.setTextColor(0xff121725);
+        }
         send.setPadding(dp(16), 0, dp(16), 0);
         body.addView(send, new LinearLayout.LayoutParams(-2, dp(48)));
         divider(body);
@@ -415,7 +425,7 @@ public class MainActivity extends Activity {
         addHeader(page);
         homeReceiveStatus = new TextView(this);
         updateHomeReceiverError();
-        homeReceiveStatus.setTextColor(getColor(R.color.tvlink_secondary));
+        homeReceiveStatus.setTextColor(0xffb8c3d6);
         homeReceiveStatus.setTextSize(13);
         homeReceiveStatus.setGravity(Gravity.CENTER);
         page.addView(homeReceiveStatus);
@@ -471,7 +481,7 @@ public class MainActivity extends Activity {
         header.addView(settings, settingsSize);
 
         android.view.View divider = new android.view.View(this);
-        divider.setBackgroundColor(getColor(R.color.tvlink_border));
+        divider.setBackgroundColor(CONTENT_DIVIDER);
         LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(-1, dp(1));
         line.setMargins(0, dp(14), 0, dp(18));
         page.addView(divider, line);
@@ -495,8 +505,8 @@ public class MainActivity extends Activity {
             }
         });
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_pressed}, tile(getColor(R.color.tvlink_accent), true));
-        background.addState(new int[] {android.R.attr.state_focused}, tile(getColor(R.color.tvlink_accent), true));
+        background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
+        background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
         background.addState(new int[] {}, tile(REMOTE_BLUE, false));
         card.setBackground(background);
 
@@ -604,7 +614,7 @@ public class MainActivity extends Activity {
         banner.setMaxLines(3);
         banner.setEllipsize(android.text.TextUtils.TruncateAt.END);
         banner.setPadding(dp(16), dp(10), dp(16), dp(10));
-        banner.setBackground(tile(getColor(R.color.tvlink_surface), false));
+        banner.setBackground(tile(0xff1b2740, false));
         banner.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
         android.widget.FrameLayout.LayoutParams size = new android.widget.FrameLayout.LayoutParams(
                 -2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
@@ -643,7 +653,7 @@ public class MainActivity extends Activity {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER_HORIZONTAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackground(tile(getColor(R.color.tvlink_surface), false));
+        card.setBackground(tile(0xff1b2740, false));
         body.addView(card, new LinearLayout.LayoutParams(-1, -2));
 
         ImageView icon = new ImageView(this);
@@ -659,7 +669,13 @@ public class MainActivity extends Activity {
                 : "Remote paired · File transfer not connected");
         status.setGravity(Gravity.CENTER);
         Button unpair = button("Unpair", this::confirmUnpair);
-        unpair.setTextColor(getColor(R.color.tvlink_danger));
+        unpair.setTextColor(0xffff9baa);
+        StateListDrawable unpairBackground = new StateListDrawable();
+        unpairBackground.addState(new int[] {android.R.attr.state_pressed}, tile(0xff263a5a, true));
+        unpairBackground.addState(new int[] {android.R.attr.state_focused}, tile(0xff263a5a, true));
+        GradientDrawable unpairOutline = tile(0xff1b2740, false);
+        unpairBackground.addState(new int[] {}, unpairOutline);
+        unpair.setBackground(unpairBackground);
         card.addView(unpair, new LinearLayout.LayoutParams(-1, -2));
 
         Button change = button(linkedFiles ? "Change TV" : "Connect file transfer",
@@ -694,7 +710,7 @@ public class MainActivity extends Activity {
         TextView detail = info(body, "Open TVLink on your TV.\nConnect both devices to the same network.");
         detail.setTextSize(16);
         detail.setGravity(Gravity.CENTER);
-        detail.setTextColor(getColor(R.color.tvlink_secondary));
+        detail.setTextColor(0xffb8c3d6);
 
         LinearLayout actions = new LinearLayout(this);
         LinearLayout.LayoutParams actionsSize = new LinearLayout.LayoutParams(-1, -2);
@@ -713,7 +729,7 @@ public class MainActivity extends Activity {
                 .setMessage("This removes the saved Remote and file link from this phone.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Unpair", (d, w) -> unpairTv()).show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(getColor(R.color.tvlink_danger_confirm));
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xffff7186);
     }
 
     private void unpairTv() {
@@ -903,7 +919,7 @@ public class MainActivity extends Activity {
                 if (!message.contentEquals(status.getText())) {
                     android.text.SpannableString label = new android.text.SpannableString(message);
                     if (message.startsWith("●  Ready")) {
-                        label.setSpan(new android.text.style.ForegroundColorSpan(getColor(R.color.tvlink_accent)), 0, 1,
+                        label.setSpan(new android.text.style.ForegroundColorSpan(FOCUS_BLUE), 0, 1,
                                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     status.setText(label);
@@ -1039,7 +1055,7 @@ public class MainActivity extends Activity {
         button.setSelected(selected);
         tab.addView(button, new LinearLayout.LayoutParams(-1, dp(48)));
         android.view.View indicator = new android.view.View(this);
-        indicator.setBackgroundColor(selected ? getColor(R.color.tvlink_accent) : Color.TRANSPARENT);
+        indicator.setBackgroundColor(selected ? FOCUS_BLUE : Color.TRANSPARENT);
         LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(-1, dp(2));
         line.setMarginStart(dp(16));
         line.setMarginEnd(dp(16));
@@ -1301,7 +1317,7 @@ public class MainActivity extends Activity {
         showingHome = false;
         LinearLayout page = screen(null);
         page.setPadding(dp(20), dp(12), dp(20), dp(16));
-        page.setBackgroundColor(getColor(R.color.tvlink_background));
+        page.setBackgroundColor(REMOTE_NAVY);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -1369,8 +1385,8 @@ public class MainActivity extends Activity {
     private StateListDrawable remoteBackground(int fill, int border, int radius) {
         StateListDrawable background = new StateListDrawable();
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(fill == REMOTE_BLUE ? getColor(R.color.tvlink_accent) : 0xff31446d);
-        pressed.setStroke(dp(2), getColor(R.color.tvlink_accent));
+        pressed.setColor(fill == REMOTE_BLUE ? FOCUS_BLUE : 0xff31446d);
+        pressed.setStroke(dp(2), FOCUS_BLUE);
         pressed.setCornerRadius(dp(radius));
         GradientDrawable normal = new GradientDrawable();
         normal.setColor(fill);
@@ -1387,7 +1403,7 @@ public class MainActivity extends Activity {
         RemoteIconView button = new RemoteIconView(this, icon, label,
                 light || onPad ? REMOTE_NAVY : REMOTE_BLUE);
         button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_BLUE : REMOTE_NAVY,
-                light || onPad ? 0 : getColor(R.color.tvlink_border), radius));
+                light || onPad ? 0 : CONTENT_DIVIDER, radius));
         button.setOnClickListener(view -> action.run());
         return button;
     }
@@ -1674,7 +1690,7 @@ public class MainActivity extends Activity {
             GradientDrawable border = new GradientDrawable();
             border.setColor(0xff0e1728);
             border.setCornerRadius(dp(8));
-            border.setStroke(dp(focused ? 2 : 1), focused ? getColor(R.color.tvlink_accent) : getColor(R.color.tvlink_border));
+            border.setStroke(dp(focused ? 2 : 1), focused ? FOCUS_BLUE : CONTENT_DIVIDER);
             digit.setBackground(border);
         }
     }
@@ -1946,7 +1962,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(dialog.getContext());
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(16), dp(24), dp(12));
-        page.setBackgroundColor(getColor(R.color.tvlink_background));
+        page.setBackgroundColor(REMOTE_NAVY);
 
         TextView device = new TextView(dialog.getContext());
         device.setText(linkedTvName());
@@ -1960,7 +1976,7 @@ public class MainActivity extends Activity {
         editor.setHorizontallyScrolling(false);
         editor.setMaxLines(8);
         editor.setTextColor(Color.WHITE);
-        editor.setHintTextColor(getColor(R.color.tvlink_secondary));
+        editor.setHintTextColor(0xffb8c3d6);
         editor.setTextSize(30);
         editor.setGravity(Gravity.TOP | Gravity.START);
         editor.setBackgroundColor(Color.TRANSPARENT);
