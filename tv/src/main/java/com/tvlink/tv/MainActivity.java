@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(24), dp(24), dp(24));
-        page.setBackgroundColor(0xff060f25);
+        page.setBackgroundColor(0xff101624);
         deviceCardName = null;
         deviceCard = null;
         storageFolder = null;
