@@ -1,0 +1,130 @@
+name: Publish Stable Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, for example v1.0.0'
+        required: true
+        type: string
+      commit:
+        description: 'Full SHA of the build commit (leave blank to use main)'
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: tvlink-stable-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Verify builds and publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT="${SOURCE_COMMIT:-$GITHUB_SHA}"
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ||
+                ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Enter a tag like v1.0.0 and the full 40-character build commit SHA."
+            exit 1
+          fi
+          git merge-base --is-ancestor "$SOURCE_COMMIT" HEAD
+          version="${RELEASE_TAG#v}"
+          for module in mobile tv universal; do
+            declared="$(git show "$SOURCE_COMMIT:$module/build.gradle.kts" |
+              sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p')"
+            if [[ "$declared" != "$version" ]]; then
+              echo "::error::$module versionName must match $version at $SOURCE_COMMIT."
+              exit 1
+            fi
+          done
+
+          download_build() {
+            local workflow="$1"
+            shift
+            local run_id artifact found complete
+            local runs
+            runs="$(gh run list --workflow "$workflow" --branch main --commit "$SOURCE_COMMIT" \
+              --status success --limit 30 --json databaseId --jq '.[].databaseId')"
+            while IFS= read -r run_id; do
+              [[ -n "$run_id" ]] || continue
+              found="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+                --jq '.artifacts[] | select(.expired == false) | .name')"
+              complete=true
+              for artifact in "$@"; do
+                if ! grep -Fxq -- "$artifact" <<< "$found"; then complete=false; fi
+              done
+              if [[ "$complete" == true ]]; then
+                for artifact in "$@"; do
+                  gh run download "$run_id" --name "$artifact" --dir "stable-artifacts/$artifact"
+                done
+                return
+              fi
+            done <<< "$runs"
+            echo "::error::No successful $workflow build on main with all required artifacts for $SOURCE_COMMIT. Run it manually on that commit (scope both for Mobile/TV)."
+            return 1
+          }
+
+          download_build build-tvlink-apks.yml TVLink-MOBILE-release TVLink-TV-release
+          download_build build-tvlink-universal.yml TVLink-Universal
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK unavailable}}"
+          if [[ ! -x "$sdk/build-tools/34.0.0/apksigner" ]]; then
+            sdkmanager --sdk_root="$sdk" --install 'build-tools;34.0.0'
+          fi
+          tools="$sdk/build-tools/34.0.0"
+          mkdir stable-release
+          stage_apk() {
+            local artifact="$1" package="$2" label="$3"
+            local apk="stable-artifacts/$artifact/$artifact.apk"
+            local badging package_line apk_package apk_version
+            [[ -s "$apk" ]]
+            "$tools/apksigner" verify --print-certs "$apk"
+            badging="$("$tools/aapt" dump badging "$apk")"
+            package_line="$(sed -n '/^package: /p' <<< "$badging")"
+            apk_package="$(sed -nE "s/^package: name='([^']+)'.*/\1/p" <<< "$package_line")"
+            apk_version="$(sed -nE "s/^package: .*versionName='([^']+)'.*/\1/p" <<< "$package_line")"
+            if [[ "$apk_package" != "$package" || "$apk_version" != "$version" ]]; then
+              echo "::error::Unexpected package or version in $artifact."
+              return 1
+            fi
+            cp -- "$apk" "stable-release/TVLink-$RELEASE_TAG-$label.apk"
+          }
+          stage_apk TVLink-MOBILE-release com.tvlink.mobile Android-Mobile
+          stage_apk TVLink-TV-release com.tvlink.tv Android-TV
+          stage_apk TVLink-Universal com.tvlink.universal Universal
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists. It was not modified."
+            exit 1
+          fi
+          existing_tag="$(git ls-remote origin "refs/tags/$RELEASE_TAG")"
+          release_target=(--target "$SOURCE_COMMIT")
+          if [[ -n "$existing_tag" ]]; then
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            if [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" != "$SOURCE_COMMIT" ]]; then
+              echo "::error::Tag $RELEASE_TAG points to a different commit."
+              exit 1
+            fi
+            release_target=(--verify-tag)
+          fi
+          notes="$(printf '%s\n' '## APK downloads' '' \
+            '- **Android Mobile** for Android phones and tablets.' \
+            '- **Android TV** for Android TV devices.' \
+            '- **Universal (Android Mobile & Android TV)** for both device types.')"
+          gh release create "$RELEASE_TAG" stable-release/*.apk "${release_target[@]}" \
+            --title "TVLink $RELEASE_TAG" --notes "$notes" --latest
