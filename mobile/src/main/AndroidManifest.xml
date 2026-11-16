@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+    <queries>
+        <intent><action android:name="android.speech.RecognitionService"/></intent>
+    </queries>
     <application android:label="TVLink" android:icon="@mipmap/tvlink_launcher"  android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false">
         <receiver android:name="com.tvlink.mobile.StartupReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>

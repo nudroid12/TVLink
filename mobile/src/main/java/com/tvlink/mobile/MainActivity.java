@@ -1466,6 +1466,8 @@ public class MainActivity extends Activity {
         addRemoteControls(controls, "back", "Back", 4, "home", "Home", 3, "volume_up", "Volume up", 24, true);
         addRemoteControls(controls, "mic", "Voice assistant", 231, "mute", "Mute", 164,
                 "volume_down", "Volume down", 25, false);
+        remoteVoiceMeter = new VoiceMeter(this);
+        controls.addView(remoteVoiceMeter, new LinearLayout.LayoutParams(diameter, dp(40)));
         connectRemoteScreen(status);
     }
 
@@ -1496,8 +1498,12 @@ public class MainActivity extends Activity {
     }
 
     private RemoteIconView remoteKey(String icon, String label, int key, boolean light, int radius) {
-        return remoteIcon(icon, label, "mic".equals(icon) ? this::startRemoteVoice : () -> sendSystemKey(key),
-                light, radius, false);
+        if (!"mic".equals(icon)) return remoteIcon(icon, label, () -> sendSystemKey(key), light, radius, false);
+        RemoteIconView button = remoteIcon(icon, "Hold to talk to TV",
+                () -> notifyUser("Hold the microphone while you speak."), light, radius, false);
+        bindVoiceHold(button, () -> startRemoteVoice(remoteVoiceMeter), this::finishAssistantVoice,
+                this::cancelAssistantVoice);
+        return button;
     }
 
     private void addDirection(android.widget.FrameLayout pad, String icon, String label, int key,
@@ -2083,6 +2089,16 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams navigationSize = new LinearLayout.LayoutParams(-2, dp(48));
         navigationSize.gravity = Gravity.CENTER_HORIZONTAL;
+        if (!isPasswordField(state.inputType)) {
+            VoiceMeter meter = new VoiceMeter(dialog.getContext());
+            page.addView(meter, new LinearLayout.LayoutParams(-1, dp(40)));
+            Button mic = button("Hold to dictate", () -> notifyUser("Hold the button while you speak."));
+            LinearLayout.LayoutParams micSize = new LinearLayout.LayoutParams(-2, dp(48));
+            micSize.gravity = Gravity.CENTER_HORIZONTAL;
+            page.addView(mic, micSize);
+            bindVoiceHold(mic, () -> startDictation(dialog, editor, meter), this::finishDictation,
+                    this::cancelDictation);
+        }
         page.addView(navigation, navigationSize);
         dialog.setContentView(page);
         remoteKeyboardDialog = dialog;
@@ -2113,6 +2129,7 @@ public class MainActivity extends Activity {
             }
         });
         dialog.setOnDismissListener(ignored -> {
+            cancelDictation();
             cancelPendingRemoteText();
             remoteEditor = null;
             remoteKeyboardDialog = null;
@@ -2153,79 +2170,175 @@ public class MainActivity extends Activity {
     private volatile int remoteSessionGeneration;
 
     private static final int VOICE_PERMISSION_REQUEST = 241;
-    private AlertDialog voiceDialog;
-    private boolean voiceRunning;
-    private java.util.concurrent.atomic.AtomicBoolean finishVoice;
+    private VoiceMeter remoteVoiceMeter;
+    private AssistantVoiceHold assistantVoice;
+    private VoiceDictation dictation;
 
-    private void startRemoteVoice() {
+    private static void bindVoiceHold(android.view.View button, Runnable start, Runnable finish, Runnable cancel) {
+        button.setOnTouchListener(new android.view.View.OnTouchListener() {
+            private int pointer = -1;
+
+            @Override public boolean onTouch(android.view.View view, android.view.MotionEvent event) {
+                int action = event.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    pointer = event.getPointerId(0);
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
+                    view.setPressed(true);
+                    start.run();
+                } else if (action == android.view.MotionEvent.ACTION_CANCEL) {
+                    if (pointer != -1) cancel.run();
+                    reset(view);
+                } else if ((action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_POINTER_UP)
+                        && event.getPointerId(event.getActionIndex()) == pointer) {
+                    finish.run();
+                    reset(view);
+                }
+                return true;
+            }
+
+            private void reset(android.view.View view) {
+                pointer = -1;
+                view.setPressed(false);
+                view.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+        });
+    }
+
+    private boolean hasVoicePermission() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return true;
+        requestPermissions(new String[] {android.Manifest.permission.RECORD_AUDIO}, VOICE_PERMISSION_REQUEST);
+        return false;
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != VOICE_PERMISSION_REQUEST) return;
+        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            notifyUser("Hold the microphone button again to speak.");
+        } else {
+            notifyUser("Allow microphone access to use voice input.");
+        }
+    }
+
+    private static boolean isPasswordField(int inputType) {
+        int kind = inputType & android.text.InputType.TYPE_MASK_CLASS;
+        int variation = inputType & android.text.InputType.TYPE_MASK_VARIATION;
+        if (kind == android.text.InputType.TYPE_CLASS_NUMBER) {
+            return variation == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+        }
+        return kind == android.text.InputType.TYPE_CLASS_TEXT
+                && (variation == android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                || variation == android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                || variation == android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+    }
+
+    private void startDictation(android.app.Dialog keyboard, EditText editor, VoiceMeter meter) {
+        if (dictation != null || assistantVoice != null || !started || remoteEditor != editor
+                || remoteKeyboardDialog != keyboard || !hasVoicePermission()) return;
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            notifyUser("Speech recognition is unavailable on this phone.");
+            return;
+        }
+        AndroidTvRemote.ImeState target = remoteIme;
+        if (target == null || isPasswordField(target.inputType)) return;
+        meter.show("Starting microphone…");
+        dictation = new VoiceDictation(this, meter, (words, error) -> {
+            dictation = null;
+            meter.hide();
+            if (remoteKeyboardDialog != keyboard || remoteEditor != editor || !started
+                    || remoteIme == null || remoteIme.field != target.field) return;
+            if (error != null) {
+                notifyUser(error);
+            } else if (words != null) {
+                int selectionStart = editor.getSelectionStart();
+                int selectionEnd = editor.getSelectionEnd();
+                if (selectionStart < 0 || selectionEnd < 0) selectionStart = selectionEnd = editor.length();
+                editor.getText().replace(Math.min(selectionStart, selectionEnd),
+                        Math.max(selectionStart, selectionEnd), words);
+                Runnable latest = pendingRemoteText;
+                cancelPendingRemoteText();
+                if (latest != null) latest.run();
+            }
+        });
+        dictation.start();
+    }
+
+    private void finishDictation() {
+        if (dictation != null) dictation.finish();
+    }
+
+    private void cancelDictation() {
+        if (dictation != null) dictation.cancel();
+    }
+
+    private static final class AssistantVoiceHold {
+        final java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.concurrent.atomic.AtomicBoolean finish = new java.util.concurrent.atomic.AtomicBoolean();
+    }
+
+    private void startRemoteVoice(VoiceMeter meter) {
         AndroidTvRemote connection = remoteConnection;
-        if (voiceRunning || !started || remoteStatus == null || remoteConnecting) return;
+        if (assistantVoice != null || dictation != null || !started || remoteStatus == null || remoteConnecting) return;
         if (connection == null || !connection.isOpen()) {
             notifyUser("Connect to your TV before using the microphone.");
+            return;
+        }
+        if (remoteIme != null) {
+            openRemoteKeyboard();
+            notifyUser("Hold Dictate on the keyboard to enter text.");
             return;
         }
         if (!connection.supportsVoice()) {
             notifyUser("This TV does not offer Remote voice input.");
             return;
         }
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[] {android.Manifest.permission.RECORD_AUDIO}, VOICE_PERMISSION_REQUEST);
-            return;
-        }
-        java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
-        java.util.concurrent.atomic.AtomicBoolean finish = new java.util.concurrent.atomic.AtomicBoolean();
-        AlertDialog dialog = new AlertDialog.Builder(this, R.style.TVLinkPairingDialog)
-                .setTitle("Voice input")
-                .setMessage("Waiting for your TV…")
-                .setNegativeButton("Stop", (closed, which) -> finish.set(true))
-                .create();
-        dialog.setOnDismissListener(closed -> stopped.set(true));
-        voiceDialog = dialog;
-        finishVoice = finish;
-        voiceRunning = true;
-        dialog.show();
+        if (!hasVoicePermission()) return;
+        AssistantVoiceHold hold = new AssistantVoiceHold();
+        assistantVoice = hold;
+        meter.show("Waiting for your TV…");
         new Thread(() -> {
             String failure = null;
             try {
-                RemoteVoice.capture(connection, stopped, finish, () -> runOnUiThread(() -> {
-                    if (dialog.isShowing()) dialog.setMessage("Speak now. Tap Stop when you’re done.");
+                RemoteVoice.capture(connection, hold.stopped, hold.finish, level -> runOnUiThread(() -> {
+                    if (assistantVoice == hold && !hold.stopped.get()) {
+                        meter.label("Listening · release to finish");
+                        meter.level(level);
+                    }
                 }));
-            } catch (java.io.IOException | RuntimeException error) {
-                if (!stopped.get()) {
+            } catch (IOException | RuntimeException error) {
+                if (!hold.stopped.get() || hold.finish.get()) {
                     failure = error.getMessage() == null ? "Could not use the microphone." : error.getMessage();
                 }
             } finally {
                 String message = failure;
                 runOnUiThread(() -> {
-                    if (voiceDialog != dialog) return;
-                    voiceDialog = null;
-                    finishVoice = null;
-                    voiceRunning = false;
-                    dialog.dismiss();
+                    if (assistantVoice != hold) return;
+                    assistantVoice = null;
+                    meter.hide();
                     if (message != null && started && remoteStatus != null) notifyUser(message);
                 });
             }
         }, "TVLink voice capture").start();
     }
 
-    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == VOICE_PERMISSION_REQUEST) {
-            if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                if (remoteConnection != null && remoteConnection.isOpen() && started) startRemoteVoice();
-                else notifyUser("Tap the microphone again after the Remote reconnects.");
-            } else {
-                notifyUser("Allow microphone access to send voice commands.");
-            }
-        }
+    private void finishAssistantVoice() {
+        if (assistantVoice == null) return;
+        assistantVoice.finish.set(true);
+        assistantVoice.stopped.set(true);
+        remoteVoiceMeter.label("Finishing…");
+    }
+
+    private void cancelAssistantVoice() {
+        if (assistantVoice == null) return;
+        assistantVoice.finish.set(false);
+        assistantVoice.stopped.set(true);
     }
 
     private void suspendRemoteSession() {
-        if (voiceDialog != null) {
-            finishVoice.set(false);
-            voiceDialog.dismiss();
-        }
+        cancelDictation();
+        cancelAssistantVoice();
         remoteSessionGeneration++;
         updateRemoteIme(null);
         remoteConnecting = false;
