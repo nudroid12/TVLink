@@ -1,9 +1,9 @@
 <resources>
     <style name="TVLinkPairingDialog" parent="@android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/mobile_dialog_panel</item>
-        <item name="android:colorAccent">#7FB1FE</item>
-        <item name="android:colorBackground">#19243A</item>
-        <item name="android:textColorPrimary">#F4F6FF</item>
-        <item name="android:textColorSecondary">#C0CCE4</item>
+        <item name="android:colorAccent">@color/tvlink_accent</item>
+        <item name="android:colorBackground">@color/tvlink_surface</item>
+        <item name="android:textColorPrimary">@color/tvlink_text</item>
+        <item name="android:textColorSecondary">@color/tvlink_secondary</item>
     </style>
 </resources>

@@ -1,0 +1,10 @@
+<resources>
+    <color name="tvlink_background">#101624</color>
+    <color name="tvlink_surface">#1B2740</color>
+    <color name="tvlink_border">#34425A</color>
+    <color name="tvlink_accent">#7FB1FE</color>
+    <color name="tvlink_secondary">#B8C3D6</color>
+    <color name="tvlink_text">#FFFFFF</color>
+    <color name="tvlink_danger">#FF9BAA</color>
+    <color name="tvlink_danger_confirm">#FF7186</color>
+</resources>
