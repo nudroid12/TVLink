@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/nudroid12/TVLink/releases"><strong>Download APK</strong></a>
+  <a href="https://github.com/nudroid12/TVLink/releases/latest"><strong>Download APK</strong></a>
 </p>
 
 ## Screenshots
