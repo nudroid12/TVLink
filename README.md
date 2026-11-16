@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Control your Android TV from your phone and transfer files between both devices over the same Wi-Fi network.
+  An Android TV remote, keyboard and file transfer app for your phone and TV over the same Wi-Fi network.
 </p>
 
 <p align="center">
@@ -18,7 +18,8 @@
 
 ## Features
 
-- **Remote control** — navigate Android TV and type using your phone’s keyboard.
+- **Remote control** — navigate Android TV from your phone.
+- **Android TV keyboard** — use your phone’s keyboard to type in supported text fields on your TV.
 - **Two-way file transfer** — send files between your phone and TV.
 - **My Files** — browse received files and move them between folders on your TV.
 
