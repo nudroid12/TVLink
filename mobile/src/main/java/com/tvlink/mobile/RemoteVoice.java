@@ -15,7 +15,7 @@ final class RemoteVoice {
     private static final int CHUNK_BYTES = 20 * 1024;
     private static final long MAX_DURATION_MS = 8000;
     private static final long RECOGNITION_TAIL_MS = 6000;
-    private static final long RESPONSE_GRACE_MS = 12000;
+    private static final long RESPONSE_GRACE_MS = 10000;
 
     static void capture(AndroidTvRemote remote, AtomicBoolean stopped, AtomicBoolean finish,
                         IntConsumer level) throws IOException {

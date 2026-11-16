@@ -114,7 +114,7 @@ final class VoiceMeter {
 
         Waveform(Context context) {
             super(context);
-            paint.setColor(MainActivity.SEND_FILE_BLUE);
+            paint.setColor(MainActivity.FOCUS_BLUE);
             paint.setStrokeCap(Paint.Cap.ROUND);
         }
 
