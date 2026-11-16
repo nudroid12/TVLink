@@ -218,10 +218,9 @@ public class MainActivity extends Activity {
         page.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(48)));
         boolean showBack = !"Pair".equals(title) && !"Remote".equals(title)
                 && !"My Files".equals(title) && !"Settings".equals(title)
-                && !"Send / Receive".equals(title);
+                && !"Send / Receive".equals(title) && !"About".equals(title);
         if (showBack) {
-            Runnable back = "About".equals(title) ? this::showSettings : this::home;
-            titleRow.addView(button("Back", back), new LinearLayout.LayoutParams(dp(82), dp(42)));
+            titleRow.addView(button("Back", this::home), new LinearLayout.LayoutParams(dp(82), dp(42)));
         }
         TextView heading = new TextView(this);
         heading.setText(title);
@@ -318,51 +317,58 @@ public class MainActivity extends Activity {
         LinearLayout body = feature("About");
         showingAbout = true;
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER_HORIZONTAL);
-        content.setPadding(0, dp(16), 0, dp(16));
-        int width = Math.min(dp(430), getResources().getDisplayMetrics().widthPixels - dp(48));
-        LinearLayout.LayoutParams contentSize = new LinearLayout.LayoutParams(width, -2);
-        contentSize.gravity = Gravity.CENTER_HORIZONTAL;
-        body.addView(content, contentSize);
+        LinearLayout columns = new LinearLayout(this);
+        columns.setBaselineAligned(false);
+        columns.setPadding(0, dp(24), 0, dp(16));
+        body.addView(columns, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout identity = new LinearLayout(this);
+        identity.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams identitySize = new LinearLayout.LayoutParams(0, -2, 1.05f);
+        identitySize.setMarginEnd(dp(24));
+        columns.addView(identity, identitySize);
 
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.tv_tvlink_wordmark);
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setScaleType(ImageView.ScaleType.FIT_START);
         logo.setContentDescription("TVLink");
-        content.addView(logo, new LinearLayout.LayoutParams(dp(160), dp(52)));
+        int logoWidth = Math.min(dp(260), (getResources().getDisplayMetrics().widthPixels - dp(72)) / 2);
+        identity.addView(logo, new LinearLayout.LayoutParams(logoWidth, dp(84)));
+        addAboutText(identity, "Version " + appVersion(), Color.WHITE, 20, 4);
+        addAboutText(identity, "Remote control, phone keyboard input and file transfer for Android TV.",
+                Color.WHITE, 18, 12);
+        addAboutText(identity, "Developed by NudroidLabs\nPublished by KebunApp", 0xffc0cce4, 16, 24);
 
-        TextView identity = new TextView(this);
-        identity.setGravity(Gravity.CENTER);
-        identity.setText("Version " + appVersion() + "\nRemote control, phone keyboard input and file transfer for Android TV.");
-        identity.setTextColor(0xffc0cce4);
-        identity.setTextSize(14);
-        identity.setLineSpacing(dp(4), 1);
-        identity.setPadding(0, dp(4), 0, dp(16));
-        content.addView(identity, new LinearLayout.LayoutParams(-1, -2));
-
-        Button updates = addAboutAction(content, "Check for updates", () -> ReleaseCheck.check(this));
-        addAboutAction(content, "Support", this::showAboutSupport);
-        divider(content);
-
-        TextView credit = new TextView(this);
-        credit.setText("Developed by NudroidLabs\nPublished by KebunApp");
-        credit.setTextColor(0xffc0cce4);
-        credit.setTextSize(13);
-        credit.setLineSpacing(dp(4), 1);
-        credit.setPadding(dp(12), dp(12), dp(12), 0);
-        content.addView(credit, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.VERTICAL);
+        columns.addView(actions, new LinearLayout.LayoutParams(0, -2, 1));
+        Button updates = addAboutAction(actions, "Check for updates", R.drawable.ic_about_update,
+                () -> ReleaseCheck.check(this));
+        addAboutAction(actions, "Support", R.drawable.ic_about_support, this::showAboutSupport);
         updates.requestFocus();
     }
 
-    private Button addAboutAction(LinearLayout content, String label, Runnable action) {
-        divider(content);
+    private void addAboutText(LinearLayout parent, String value, int color, int size, int topMargin) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(color);
+        text.setTextSize(size);
+        text.setLineSpacing(dp(4), 1);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(topMargin);
+        parent.addView(text, params);
+    }
+
+    private Button addAboutAction(LinearLayout content, String label, int icon, Runnable action) {
         Button row = button(label, action);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), 0, dp(12), 0);
-        row.setBackground(flatRowBackground());
-        content.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+        row.setPadding(dp(16), 0, dp(16), 0);
+        row.setCompoundDrawablePadding(dp(12));
+        row.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, R.drawable.ic_about_chevron, 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(12);
+        row.setMinHeight(dp(58));
+        content.addView(row, params);
         return row;
     }
 
@@ -1110,13 +1116,9 @@ public class MainActivity extends Activity {
         divider(body);
         if (browsing) {
             info(body, folder.getAbsolutePath());
-        } else {
-            String path = "Received / " + TvSettings.directoryLabel(this);
-            if (!folder.equals(receiveRoot)) {
-                path += " / " + folder.getAbsolutePath().substring(receiveRoot.getAbsolutePath().length() + 1)
-                        .replace(File.separator, " / ");
-            }
-            info(body, path);
+        } else if (!folder.equals(receiveRoot)) {
+            info(body, folder.getAbsolutePath().substring(receiveRoot.getAbsolutePath().length() + 1)
+                    .replace(File.separator, " / "));
         }
         File[] files = folder.listFiles(file -> !file.getName().startsWith(".") && filesView.includes(file)
                 && (browsing ? TvSettings.canBrowse(this, file) : TvSettings.isReceivedEntry(receiveRoot, file)));

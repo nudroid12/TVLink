@@ -594,7 +594,7 @@ public class MainActivity extends Activity {
         StateListDrawable background = new StateListDrawable();
         background.addState(new int[] {android.R.attr.state_pressed}, tile(FOCUS_BLUE, true));
         background.addState(new int[] {android.R.attr.state_focused}, tile(FOCUS_BLUE, true));
-        background.addState(new int[] {}, tile(REMOTE_BLUE, false));
+        background.addState(new int[] {}, tile(REMOTE_WHITE, false));
         card.setBackground(background);
 
         ImageView icon = new ImageView(this);
@@ -1153,7 +1153,7 @@ public class MainActivity extends Activity {
         body.setGravity(Gravity.CENTER);
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_files);
-        icon.setColorFilter(REMOTE_BLUE);
+        icon.setColorFilter(REMOTE_WHITE);
         body.addView(icon, new LinearLayout.LayoutParams(dp(68), dp(68)));
         TextView text = info(body, message);
         text.setGravity(Gravity.CENTER);
@@ -1398,7 +1398,7 @@ public class MainActivity extends Activity {
     private boolean remotePairing;
 
     private static final int REMOTE_NAVY = 0xff0b1329;
-    private static final int REMOTE_BLUE = 0xffaec0ff;
+    private static final int REMOTE_WHITE = Color.WHITE;
 
     private void showRemote() {
         showingHome = false;
@@ -1413,13 +1413,13 @@ public class MainActivity extends Activity {
         title.setText("Remote");
         title.setTextSize(26);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setTextColor(REMOTE_BLUE);
+        title.setTextColor(REMOTE_WHITE);
         title.setGravity(Gravity.CENTER);
         header.addView(title, new LinearLayout.LayoutParams(-1, -1));
 
         TextView status = info(page, "Connecting…");
         status.setGravity(Gravity.CENTER);
-        status.setTextColor(REMOTE_BLUE);
+        status.setTextColor(REMOTE_WHITE);
         status.setMaxLines(2);
         remoteStatus = status;
         status.setOnClickListener(view -> showDevice());
@@ -1446,7 +1446,7 @@ public class MainActivity extends Activity {
         int height = getResources().getDisplayMetrics().heightPixels;
         int diameter = Math.max(dp(170), Math.min(dp(300), Math.min(width - dp(64), height / 3)));
         android.widget.FrameLayout pad = new android.widget.FrameLayout(this);
-        pad.setBackground(remoteBackground(REMOTE_BLUE, 0, 200));
+        pad.setBackground(remoteBackground(REMOTE_WHITE, 0, 200));
         LinearLayout.LayoutParams padSize = new LinearLayout.LayoutParams(diameter, diameter);
         padSize.setMargins(0, dp(24), 0, dp(30));
         controls.addView(pad, padSize);
@@ -1457,7 +1457,7 @@ public class MainActivity extends Activity {
         addDirection(pad, "right", "Right", 22, Gravity.RIGHT | Gravity.CENTER_VERTICAL, target);
         Button ok = button("OK", () -> sendSystemKey(23));
         ok.setPadding(0, 0, 0, 0);
-        ok.setTextColor(REMOTE_BLUE);
+        ok.setTextColor(REMOTE_WHITE);
         ok.setTextSize(22);
         ok.setBackground(remoteBackground(REMOTE_NAVY, 0, 120));
         int center = Math.round(diameter * .42f);
@@ -1472,7 +1472,7 @@ public class MainActivity extends Activity {
     private StateListDrawable remoteBackground(int fill, int border, int radius) {
         StateListDrawable background = new StateListDrawable();
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(fill == REMOTE_BLUE ? FOCUS_BLUE : 0xff31446d);
+        pressed.setColor(fill == REMOTE_WHITE ? 0xffe4e9f2 : 0xff31446d);
         pressed.setStroke(dp(2), FOCUS_BLUE);
         pressed.setCornerRadius(dp(radius));
         GradientDrawable normal = new GradientDrawable();
@@ -1488,8 +1488,8 @@ public class MainActivity extends Activity {
     private RemoteIconView remoteIcon(String icon, String label, Runnable action, boolean light,
                                       int radius, boolean onPad) {
         RemoteIconView button = new RemoteIconView(this, icon, label,
-                light || onPad ? REMOTE_NAVY : REMOTE_BLUE);
-        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_BLUE : REMOTE_NAVY,
+                light || onPad ? REMOTE_NAVY : REMOTE_WHITE);
+        button.setBackground(remoteBackground(onPad ? Color.TRANSPARENT : light ? REMOTE_WHITE : REMOTE_NAVY,
                 light || onPad ? 0 : CONTENT_DIVIDER, radius));
         button.setOnClickListener(view -> action.run());
         return button;
@@ -1498,7 +1498,7 @@ public class MainActivity extends Activity {
     private RemoteIconView remoteKey(String icon, String label, int key, boolean light, int radius) {
         RemoteIconView button = remoteIcon(icon, label, () -> sendSystemKey(key), light, radius, false);
         if ("mic".equals(icon)) {
-            button.setOnClickListener(view -> showVoicePopup(button, "Hold to talk",
+            button.setOnClickListener(view -> showVoicePopup(button, "Hold the mic to talk",
                     this::startRemoteVoice, this::finishAssistantVoice, this::cancelAssistantVoice));
         }
         return button;
@@ -2058,7 +2058,7 @@ public class MainActivity extends Activity {
 
         TextView device = new TextView(dialog.getContext());
         device.setText(linkedTvName());
-        device.setTextColor(REMOTE_BLUE);
+        device.setTextColor(REMOTE_WHITE);
         device.setTextSize(22);
         device.setGravity(Gravity.CENTER);
         page.addView(device, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -2089,7 +2089,7 @@ public class MainActivity extends Activity {
         navigationSize.gravity = Gravity.CENTER_HORIZONTAL;
         if (!isPasswordField(state.inputType)) {
             RemoteIconView mic = remoteIcon("mic", "Voice dictation", () -> {}, false, 24, false);
-            mic.setOnClickListener(view -> showVoicePopup(mic, "Hold to dictate",
+            mic.setOnClickListener(view -> showVoicePopup(mic, "Hold the mic to dictate",
                     meter -> startDictation(dialog, editor, meter), this::finishDictation,
                     this::cancelDictation));
             LinearLayout.LayoutParams micSize = new LinearLayout.LayoutParams(dp(48), dp(48));
@@ -2173,13 +2173,12 @@ public class MainActivity extends Activity {
     private VoiceDictation dictation;
     private VoiceMeter voicePopup;
 
-    private void showVoicePopup(android.view.View anchor, String title,
+    private void showVoicePopup(android.view.View anchor, String micLabel,
                                 java.util.function.Consumer<VoiceMeter> start,
                                 Runnable finish, Runnable cancel) {
         if (!started || !anchor.isAttachedToWindow() || voicePopup != null
                 || assistantVoice != null || dictation != null) return;
-        Button holdButton = button(title, () -> {});
-        holdButton.setPadding(dp(16), 0, dp(16), 0);
+        RemoteIconView holdButton = remoteIcon("mic", micLabel, () -> {}, false, 24, false);
         VoiceMeter meter = new VoiceMeter(anchor, holdButton);
         bindVoiceHold(holdButton, () -> start.accept(meter), finish, cancel);
         voicePopup = meter;

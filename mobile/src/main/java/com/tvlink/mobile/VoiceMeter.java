@@ -9,7 +9,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -18,12 +17,12 @@ import java.util.Arrays;
 
 final class VoiceMeter {
     private final View anchor;
-    private final Button holdButton;
+    private final View holdButton;
     private PopupWindow popup;
     private TextView status;
     private Waveform waveform;
 
-    VoiceMeter(View anchor, Button holdButton) {
+    VoiceMeter(View anchor, View holdButton) {
         this.anchor = anchor;
         this.holdButton = holdButton;
     }
@@ -54,7 +53,7 @@ final class VoiceMeter {
         waveform = new Waveform(context);
         panel.addView(waveform, new LinearLayout.LayoutParams(-1, dp(36)));
 
-        LinearLayout.LayoutParams buttonSize = new LinearLayout.LayoutParams(-2, dp(48));
+        LinearLayout.LayoutParams buttonSize = new LinearLayout.LayoutParams(dp(48), dp(48));
         buttonSize.gravity = Gravity.END;
         buttonSize.topMargin = dp(12);
         panel.addView(holdButton, buttonSize);
@@ -96,7 +95,7 @@ final class VoiceMeter {
     }
 
     void ready(String message) {
-        label(message == null ? "Hold the button while you speak." : message);
+        label(message == null ? "Hold the mic while you speak." : message);
         level(-1);
         holdButton.setEnabled(true);
     }
@@ -115,7 +114,7 @@ final class VoiceMeter {
 
         Waveform(Context context) {
             super(context);
-            paint.setColor(0xffaec0ff);
+            paint.setColor(Color.WHITE);
             paint.setStrokeCap(Paint.Cap.ROUND);
         }
 
@@ -124,7 +123,7 @@ final class VoiceMeter {
                 Arrays.fill(levels, 0);
             } else {
                 System.arraycopy(levels, 1, levels, 0, levels.length - 1);
-                levels[levels.length - 1] = Math.max(0, Math.min(100, level));
+                levels[levels.length - 1] = Math.min(100, Math.round(Math.max(0, level - 1) * 1.5f));
             }
             invalidate();
         }
